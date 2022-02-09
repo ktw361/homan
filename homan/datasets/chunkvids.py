@@ -12,6 +12,7 @@ def chunk_vid_index(vid_index,
                     use_frame_start=False):
     """
     Samples subsets of frames from video.
+    Eg [0, 769] => [[0,4,...196], [200,204,...396], ...]
 
     Collect 'chunks' of frames by sampling chunk_size frames spaced by chunk_step
     every chunk_spacing.

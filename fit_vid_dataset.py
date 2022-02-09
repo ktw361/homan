@@ -50,7 +50,7 @@ def get_args():
     parser.add_argument("--frame_nb",
                         default=10,
                         type=int,
-                        help="Number of video frames to process in a batch")
+                        help="Number of video frames to process in a batch, aka chunk_size")
     parser.add_argument("--data_step", default=100, type=int)
     parser.add_argument("--data_offset", default=0, type=int)
     parser.add_argument("--seed", default=0, type=int)
@@ -183,14 +183,18 @@ def main(args):
     )
     print(f"Processing {len(dataset)} samples")
     # Get pretrained networks
-    mask_extractor = MaskExtractor()
+    mask_extractor = MaskExtractor(
+            'detectron2://PointRend/InstanceSegmentation/pointrend_rcnn_R_50_FPN_3x_coco/164955410/model_final_edd263.pkl'
+            )
     hand_predictor = HandMocap(args.hand_checkpoint, args.smpl_path)
 
     all_metrics = defaultdict(list)
     for sample_idx in range(args.data_offset, len(dataset), args.data_step):
         # Prepare sample folder
+        seq_idx = dataset.chunk_index.iloc[sample_idx]['seq_idx']
+        frame_idx = dataset.chunk_index.iloc[sample_idx]['frame_idx']
         sample_folder = os.path.join(args.result_root, "samples",
-                                     f"{sample_idx:08d}")
+                                     f"{seq_idx}_{frame_idx}_{sample_idx:08d}")
         os.makedirs(sample_folder, exist_ok=True)
         save_path = os.path.join(args.result_root, "results.pkl")
         sample_path = os.path.join(sample_folder, "results.pkl")
@@ -281,7 +285,7 @@ def main(args):
             obj_verts_can = annots["objects"][0]['canverts3d']
             obj_faces = annots["objects"][0]['faces']
 
-            # Compute object pose initializations
+            # Compute object pose initializations w/ PHOSA's Diff Rendering
             object_parameters = find_optimal_poses(
                 images=images_np,
                 image_size=images_np[0].shape,

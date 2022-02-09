@@ -51,6 +51,20 @@ def get_frame_infos(images_np,
         obj_bboxes (np.ndarray): (1, frame_nb, 4) xywh object bounding boxes
         camintr (list[np.ndarray]): (frame_nb, 3, 3) intrinsic camera parameters
         image_size (int): image size
+
+    Returns:
+        person_params: list of dict with HAND MANO params
+            dict_keys(['bboxes', 'cams', 'faces', 'local_cams',
+            'verts', 'verts2d', 'rotations', 'mano_pose', 'mano_pca_pose',
+            'mano_rot', 'mano_betas', 'mano_trans', 'translations', 'hand_side',
+            'masks'])
+
+        obj_mask_infos: list of dict with object params
+         dict_keys(['bbox', 'class_id', 'full_mask', 'score',
+         'square_bbox', 'crop_mask', 'target_crop_mask'])
+
+        super2d_imgs: list of visualization
+            see viz_frame_info()
     """
     checkshape.check_shape(obj_bboxes, (1, -1, 4), "obj_bboxes")
     checkshape.check_shape(camintr[0], (3, 3), "camintr")
@@ -100,7 +114,7 @@ def get_frame_info(image,
     Regress frame hand pose and hand+object masks
 
     Arguments:
-        image (np.ndarray): hand-object image 
+        image (np.ndarray): hand-object image
         hand_bboxes (list): [{'left_hand': np.array(4,), 'right_hand': np.array(4,)}, ...] in xywh format
         hand_predictor: Hand pose regressor
         mask_extractor: Instance segmentor
