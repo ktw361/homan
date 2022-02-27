@@ -21,43 +21,57 @@ from libyana.lib3d import kcrop
 from libyana.transformutils import handutils
 from manopth import manolayer
 
+SHAPENET_PATH = "http://shapenet.cs.stanford.edu/shapenet/obj-zip/ShapeNetCore.v2/"
+
 MODELS = {
     "bottle": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "02876657/d851cbc873de1c4d3b6eb309177a6753/models/model_normalized_proc.obj",
+        "path": "data/cache/models/bottle.obj",
+        # "path": SHAPENET_PATH+
+        # "02876657/d851cbc873de1c4d3b6eb309177a6753/models/model_normalized_proc.obj",
         "scale": 0.2,
     },
     "jug": {
         "path":
-        "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+        # "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+        '/media/eve/DATA/Zhifan/YCB_Video_Models/models/019_pitcher_base/textured_simple.obj',
         "scale": 0.25,
     },
     "pitcher": {
         "path":
-        "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+        # "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+        '/media/eve/DATA/Zhifan/YCB_Video_Models/models/019_pitcher_base/textured_simple.obj',
         "scale": 0.25,
     },
     "plate": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "02880940/95ac294f47fd7d87e0b49f27ced29e3/models/model_normalized_proc.obj",
+        "path": "data/cache/models/plate.obj",
+        # "path": SHAPENET_PATH+
+        # "02880940/95ac294f47fd7d87e0b49f27ced29e3/models/model_normalized_proc.obj",
         "scale": 0.3,
     },
     "cup": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "03797390/d75af64aa166c24eacbe2257d0988c9c/models/model_normalized_proc.obj",
+        "path": "data/cache/models/cup.obj",
+        # "path": SHAPENET_PATH+
+        # "03797390/d75af64aa166c24eacbe2257d0988c9c/models/model_normalized_proc.obj",
         "scale": 0.12,
     },
     "phone": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "02992529/7ea27ed05044031a6fe19ebe291582/models/model_normalized_proc.obj",
+        "path": "data/cache/models/phone.obj",
+        # "path": SHAPENET_PATH+
+        # "02992529/7ea27ed05044031a6fe19ebe291582/models/model_normalized_proc.obj",
         "scale": 0.07
     },
     "can": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "02946921/3fd8dae962fa3cc726df885e47f82f16/models/model_normalized_proc.obj",
+        "path": "data/cache/models/can.obj",
+        # "path": SHAPENET_PATH+
+        # "02946921/3fd8dae962fa3cc726df885e47f82f16/models/model_normalized_proc.obj",
         "scale": 0.2
     }
 }
+
+
+SELECT_VIDEOS = {
+        'P08_21': 13233, # (VID, start_frame)
+        }
 
 
 def apply_bbox_transform(bbox, affine_trans):
@@ -78,7 +92,11 @@ def load_models(MODELS, normalize=True):
     for obj_name, obj_info in MODELS.items():
         obj_path = obj_info["path"]
         scale = obj_info["scale"]
-        obj = trimesh.load(obj_path)
+        if obj_path.startswith('http'):
+            obj = trimesh.load_remote(
+                    obj_path.replace('_proc',''), force='mesh')
+        else:
+            obj = trimesh.load(obj_path, force='mesh')
         verts = np.array(obj.vertices)
         if normalize:
             # center
@@ -136,8 +154,8 @@ class Epic:
         self.name = "epic"
         self.mode = mode
         self.object_models = load_models(MODELS)
-        self.frame_template = os.path.join(epic_root, "frames",
-                                           "{}/{}/{}/frame_{:010d}.jpg")
+        self.frame_template = os.path.join(epic_root, "rgb_frames",
+                                           "{}/{}/frame_{:010d}.jpg")
 
         self.resize_factor = 3
         self.frame_nb = frame_nb
@@ -166,38 +184,43 @@ class Epic:
             # annot_df = annot_df[annot_df.video_id.str.len() == 6]
 
             annot_df = annot_df[annot_df.noun.isin(nouns)]
+            # Manual selection
+            annot_df = annot_df[annot_df.video_id.isin(SELECT_VIDEOS)]
+
             print(f"Processing {annot_df.shape[0]} clips for nouns {nouns}")
             vid_index = []
             annotations = {}
             for annot_idx, (annot_key,
                             annot) in enumerate(tqdm(annot_df.iterrows())):
-                try:
-                    hoa_dets = epichoa.load_video_hoa(
-                        annot.video_id,
-                        hoa_root="local_data/datasets/epic/hoa")
-                    frame_idxs, bboxes = trackhoadf.track_hoa_df(
-                        hoa_dets,
-                        video_id=annot.video_id,
-                        start_frame=max(1, annot.start_frame - track_padding),
-                        end_frame=(min(annot.stop_frame + track_padding,
-                                       hoa_dets.frame.max() - 1)),
-                        dt=frame_step / 60,
-                    )
-                    if len(frame_idxs) > min_frame_nb:
-                        annot_full_key = (annot.video_id, annot_idx, annot_key)
-                        vid_index.append({
-                            "seq_idx": annot_full_key,
-                            "frame_nb": len(frame_idxs),
-                            "start_frame": min(frame_idxs),
-                            "object": annot.noun,
-                            "verb": annot.verb,
-                        })
-                        annotations[annot_full_key] = {
-                            "bboxes_xyxy": bboxes,
-                            "frame_idxs": frame_idxs
-                        }
-                except Exception:
-                    print(f"Skipping idx {annot_idx}")
+
+                if annot.start_frame != SELECT_VIDEOS[annot.video_id]:
+                    continue
+                hoa_dets = epichoa.load_video_hoa(
+                    annot.video_id,
+                    hoa_root="local_data/datasets/epic/hoa")
+                frame_idxs, bboxes = trackhoadf.track_hoa_df(
+                    hoa_dets,
+                    video_id=annot.video_id,
+                    start_frame=max(1, annot.start_frame - track_padding),
+                    end_frame=(min(annot.stop_frame + track_padding,
+                                   hoa_dets.frame.max() - 1)),
+                    dt=frame_step / 60,
+                )
+                if len(frame_idxs) > min_frame_nb:
+                    annot_full_key = (annot.video_id, annot_idx, annot_key)
+                    vid_index.append({
+                        "seq_idx": annot_full_key,
+                        "frame_nb": len(frame_idxs),
+                        "start_frame": min(frame_idxs),
+                        "object": annot.noun,
+                        "verb": annot.verb,
+                    })
+                    annotations[annot_full_key] = {
+                        "bboxes_xyxy": bboxes,
+                        "frame_idxs": frame_idxs
+                    }
+                # except Exception:
+                #     print(f"Skipping idx {annot_idx}")
             vid_index = pd.DataFrame(vid_index)
             dataset_annots = {
                 "vid_index": vid_index,
@@ -283,10 +306,11 @@ class Epic:
         roi, affine_trans = self.get_roi(vid_info, frame_ids)
         for frame_id in frame_ids:
             frame_idx = seq_frame_idxs[frame_id]
-            img_path = self.frame_template.format("train", video_id[:3],
-                                                  video_id, frame_idx)
-            img = self.tareader.read_tar_frame(img_path)
-            img = cv2.resize(self.tareader.read_tar_frame(img_path),
+            img_path = self.frame_template.format(
+                    video_id[:3], video_id, frame_idx)
+            # img = self.tareader.read_tar_frame(img_path)
+            img = cv2.imread(img_path)
+            img = cv2.resize(img,
                              self.image_size)
             img = Image.fromarray(img[:, :, ::-1])
 

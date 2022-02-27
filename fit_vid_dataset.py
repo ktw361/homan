@@ -53,6 +53,8 @@ def get_args():
                         help="Number of video frames to process in a batch, aka chunk_size")
     parser.add_argument("--data_step", default=100, type=int)
     parser.add_argument("--data_offset", default=0, type=int)
+    parser.add_argument("--seq_idx", type=str,
+                        help="manually select one video")
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--split",
                         default="val",
@@ -192,9 +194,11 @@ def main(args):
     for sample_idx in range(args.data_offset, len(dataset), args.data_step):
         # Prepare sample folder
         seq_idx = dataset.chunk_index.iloc[sample_idx]['seq_idx']
-        frame_idx = dataset.chunk_index.iloc[sample_idx]['frame_idx']
+        if args.seq_idx:
+            if seq_idx != args.seq_idx:
+                continue
         sample_folder = os.path.join(args.result_root, "samples",
-                                     f"{seq_idx}_{frame_idx}_{sample_idx:08d}")
+                                     f"{seq_idx}_{sample_idx:08d}")
         os.makedirs(sample_folder, exist_ok=True)
         save_path = os.path.join(args.result_root, "results.pkl")
         sample_path = os.path.join(sample_folder, "results.pkl")
@@ -326,7 +330,7 @@ def main(args):
         else:
             # Load from previous computation
             resume_folder = os.path.join(args.resume, "samples",
-                                         f"{sample_idx:08d}")
+                                         f"{seq_idx}_{sample_idx:08d}")
             resume_indep_path = os.path.join(resume_folder, "indep_fit.pkl")
             if args.resume_indep:
                 state_dict = None
@@ -535,6 +539,7 @@ def main(args):
                     },
                 }, p_f)
         saveresults.dump(args, all_metrics, save_path)
+    # End-for
 
 
 if __name__ == "__main__":

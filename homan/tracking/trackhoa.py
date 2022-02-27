@@ -120,17 +120,19 @@ def track_hoa_df(
             tracked_lh = pd.DataFrame(tracked_lh)
             tracked_lh = tracked_lh[(tracked_lh.frame > start_obj_frame)
                                     & (tracked_lh.frame <= end_obj_frame)]
-            tracked_lh = filter_longest_track(tracked_lh)
-            start_lh_frame = tracked_lh.frame.min()
-            end_lh_frame = tracked_lh.frame.max()
-            # Reduce hand and object tracks
-            tracked_lh = tracked_lh[(tracked_lh.frame > start_lh_frame)
-                                    & (tracked_lh.frame <= end_lh_frame)]
-            tracked_obj = tracked_obj[(tracked_obj.frame > start_lh_frame)
-                                      & (tracked_obj.frame <= end_lh_frame)]
-            if len(tracked_rh):
-                tracked_rh = tracked_rh[(tracked_rh.frame > start_lh_frame)
-                                        & (tracked_rh.frame <= end_lh_frame)]
+            if len(tracked_lh) > 0:
+
+                tracked_lh = filter_longest_track(tracked_lh)
+                start_lh_frame = tracked_lh.frame.min()
+                end_lh_frame = tracked_lh.frame.max()
+                # Reduce hand and object tracks
+                tracked_lh = tracked_lh[(tracked_lh.frame > start_lh_frame)
+                                        & (tracked_lh.frame <= end_lh_frame)]
+                tracked_obj = tracked_obj[(tracked_obj.frame > start_lh_frame)
+                                          & (tracked_obj.frame <= end_lh_frame)]
+                if len(tracked_rh):
+                    tracked_rh = tracked_rh[(tracked_rh.frame > start_lh_frame)
+                                            & (tracked_rh.frame <= end_lh_frame)]
 
         # For now, discard frames  of epic to only keep ones whith both hand and object tracks,
         # It would be cleaner to interpolate !

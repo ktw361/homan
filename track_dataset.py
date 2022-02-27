@@ -73,6 +73,7 @@ def main(args):
         image_size = 350
     elif args.dataset == "epic":
         dataset = Epic(mode="vid", frame_nb=-1, use_cache=args.use_cache)
+        image_size = 640
     else:
         raise ValueError(f"{args.dataset} not in ['core50','epic','ho3d']")
     hand_detector = get_hand_bbox_detector()
