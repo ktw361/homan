@@ -83,26 +83,50 @@ def track_hoa_df(
                 det_type="hand",
                 side="right",
             ))
-    if verbose:
-        obj_tracks = pd.DataFrame(tracked_obj)
-        tracked_obj = filter_longest_track(obj_tracks)
-        print_track_info(tracked_obj)
-        lh_tracks = pd.DataFrame(tracked_lh)
-        rh_tracks = pd.DataFrame(tracked_rh)
-        if len(lh_tracks):
-            print_track_info(lh_tracks, track_type="left hand")
-        else:
-            print(
-                "No lh tracks for video_id {video_id} between {start_frame} and {end_frame}"
-            )
-        if len(rh_tracks):
-            print_track_info(rh_tracks, track_type="right hand")
-        else:
-            print(
-                "No rh tracks for video_id {video_id} between {start_frame} and {end_frame}"
-            )
-        start_obj_frame = tracked_obj.frame.min()
-        end_obj_frame = tracked_obj.frame.max()
+
+    frame_idxs, res = postprocess_hoa_df(
+            tracked_obj, tracked_rh, tracked_lh,
+            rule='keep_right')
+    return frame_idxs, res
+
+
+def postprocess_hoa_df(
+        tracked_obj,
+        tracked_rh,
+        tracked_lh,
+        rule='keep_right',
+        ):
+    """
+    Args:
+        rule: str, one of
+            {'keep_right', 'keep_left', 'keep_both',
+             TODO: 'keep_self', 'by_contact'}
+    """
+    obj_tracks = pd.DataFrame(tracked_obj)
+    tracked_obj = filter_longest_track(obj_tracks)
+    print_track_info(tracked_obj)
+    lh_tracks = pd.DataFrame(tracked_lh)
+    rh_tracks = pd.DataFrame(tracked_rh)
+    if len(lh_tracks):
+        print_track_info(lh_tracks, track_type="left hand")
+    else:
+        print(
+            "No lh tracks for video_id {video_id} between {start_frame} and {end_frame}"
+        )
+    if len(rh_tracks):
+        print_track_info(rh_tracks, track_type="right hand")
+    else:
+        print(
+            "No rh tracks for video_id {video_id} between {start_frame} and {end_frame}"
+        )
+    start_obj_frame = tracked_obj.frame.min()
+    end_obj_frame = tracked_obj.frame.max()
+
+    if rule == 'keep_right':
+        return postprocess_hoa_df_keep_right(tracked_obj, tracked_rh)
+    elif rule == 'keep_left':
+        pass
+    elif rule == 'keep_both':
         # Keep only region that focuses on longest track
         if len(tracked_rh):
             tracked_rh = pd.DataFrame(tracked_rh)
@@ -134,8 +158,7 @@ def track_hoa_df(
                     tracked_rh = tracked_rh[(tracked_rh.frame > start_lh_frame)
                                             & (tracked_rh.frame <= end_lh_frame)]
 
-        # For now, discard frames  of epic to only keep ones whith both hand and object tracks,
-        # It would be cleaner to interpolate !
+
         keep_frames = set(tracked_obj.frame)
         if len(tracked_rh):
             keep_frames = keep_frames & set(tracked_rh.frame)
@@ -180,5 +203,74 @@ def track_hoa_df(
                 tracked_lh.bottom
             ], 1)
             res["left_hand"] = lh_boxes
+
+    frame_idxs = np.array(tracked_obj["index"]).tolist()
+    return frame_idxs, res
+
+
+def postprocess_hoa_df_keep_right(
+        tracked_obj,
+        tracked_rh,
+        verbose=True,
+        ):
+    obj_tracks = pd.DataFrame(tracked_obj)
+    tracked_obj = filter_longest_track(obj_tracks)
+    print_track_info(tracked_obj)
+    rh_tracks = pd.DataFrame(tracked_rh)
+    if len(rh_tracks):
+        print_track_info(rh_tracks, track_type="right hand")
+    else:
+        print(
+            "No rh tracks for video_id {video_id} between {start_frame} and {end_frame}"
+        )
+    start_obj_frame = tracked_obj.frame.min()
+    end_obj_frame = tracked_obj.frame.max()
+
+    if len(tracked_rh):
+        tracked_rh = pd.DataFrame(tracked_rh)
+        tracked_rh = tracked_rh[(tracked_rh.frame >= start_obj_frame)
+                                & (tracked_rh.frame <= end_obj_frame)]
+        tracked_rh = filter_longest_track(tracked_rh)
+        start_rh_frame = tracked_rh.frame.min()
+        end_rh_frame = tracked_rh.frame.max()
+        # Reduce hand and object tracks
+        tracked_rh = tracked_rh[(tracked_rh.frame >= start_rh_frame)
+                                & (tracked_rh.frame <= end_rh_frame)]
+        tracked_obj = tracked_obj[(tracked_obj.frame >= start_rh_frame)
+                                    & (tracked_obj.frame <= end_rh_frame)]
+
+
+    keep_frames = set(tracked_obj.frame)
+    if len(tracked_rh):
+        keep_frames = keep_frames & set(tracked_rh.frame)
+    # Finally get final tracks
+    res = {}
+    tracked_obj = tracked_obj[tracked_obj.frame.isin(keep_frames)]
+    # Interpolate missing boxes
+    new_index = pd.Index(range(min(keep_frames), max(keep_frames) + 1))
+    tracked_obj = tracked_obj[tracked_obj.frame.isin(keep_frames)]
+    tracked_obj = tracked_obj.set_index("frame").reindex(
+        new_index).reset_index().rename(columns={
+            tracked_obj.index.name: 'frame'
+        }).interpolate(method="linear")
+
+    obj_boxes = np.stack([
+        tracked_obj.left, tracked_obj.top, tracked_obj.right,
+        tracked_obj.bottom
+    ], 1)
+    res = {"objects": obj_boxes}
+    if len(tracked_rh):
+        tracked_rh = tracked_rh[tracked_rh.frame.isin(keep_frames)]
+        tracked_rh = tracked_rh.set_index("frame").reindex(
+            new_index).reset_index().rename(columns={
+                tracked_rh.index.name: 'frame'
+            }).interpolate(method="linear")
+        # xyxy boxes
+        rh_boxes = np.stack([
+            tracked_rh.left, tracked_rh.top, tracked_rh.right,
+            tracked_rh.bottom
+        ], 1)
+        res["right_hand"] = rh_boxes
+
     frame_idxs = np.array(tracked_obj["index"]).tolist()
     return frame_idxs, res

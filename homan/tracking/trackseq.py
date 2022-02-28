@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=broad-except,too-many-statements,too-many-branches,logging-fstring-interpolation,import-error
 import os
+import logging
 import warnings
 
 import numpy as np
@@ -41,6 +42,7 @@ def track_sequence(images,
             # Check if the number detected hands and objects match the expected number
             # for given dataset
             _, computed_setup, valid_bboxes = verify.check_setup(bboxes, setup)
+            logging.info("mismatch setup")
         except AssertionError:
             # In egocentric mode, detection raises error if more then 1
             # person is detected, we ignore all detections in this case

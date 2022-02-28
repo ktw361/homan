@@ -26,3 +26,4 @@ results/
 dex-ycb-toolkit/
 sample_data
 .tags
+.vscode/

@@ -194,6 +194,8 @@ def main(args):
     for sample_idx in range(args.data_offset, len(dataset), args.data_step):
         # Prepare sample folder
         seq_idx = dataset.chunk_index.iloc[sample_idx]['seq_idx']
+        if dataset.name == 'epic':  # (video_id, _, _)
+            seq_idx = seq_idx[0]
         if args.seq_idx:
             if seq_idx != args.seq_idx:
                 continue

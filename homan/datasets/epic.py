@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import os
+import os.path as osp
+
 import cv2
 import numpy as np
 import torch
@@ -12,11 +15,9 @@ from homan.datasets.chunkvids import chunk_vid_index
 from homan.tracking import trackhoa as trackhoadf
 from homan.utils import bbox as bboxutils
 
-import os
 import pandas as pd
 import pickle
 import trimesh
-import warnings
 from libyana.lib3d import kcrop
 from libyana.transformutils import handutils
 from manopth import manolayer
@@ -114,7 +115,6 @@ def load_models(MODELS, normalize=True):
 class Epic:
     def __init__(
         self,
-        root="local_data/datasets",
         joint_nb=21,
         use_cache=False,
         mano_root="extra_data/mano",
@@ -139,7 +139,7 @@ class Epic:
         box_folder="data/boxes",
         track_padding=10,
         min_frame_nb=20,
-        epic_root="local_data/datasets/epic",
+        epic_root="/home/skynet/Zhifan/datasets/epic",  # stupid intellisense can't exclude files, fuck you
     ):
         """
         Arguments:
@@ -154,16 +154,16 @@ class Epic:
         self.name = "epic"
         self.mode = mode
         self.object_models = load_models(MODELS)
-        self.frame_template = os.path.join(epic_root, "rgb_frames",
+        self.epic_root = epic_root
+        self.frame_template = osp.join(epic_root, "rgb_frames",
                                            "{}/{}/frame_{:010d}.jpg")
 
         self.resize_factor = 3
         self.frame_nb = frame_nb
         self.image_size = (640, 360)
-        cache_folder = os.path.join("data", "cache")
+        cache_folder = osp.join("data", "cache")
         os.makedirs(cache_folder, exist_ok=True)
 
-        self.root = os.path.join(root, self.name)
         left_faces = manolayer.ManoLayer(mano_root="extra_data/mano",
                                          side="left").th_faces.numpy()
         right_faces = manolayer.ManoLayer(mano_root="extra_data/mano",
@@ -177,8 +177,7 @@ class Epic:
             vid_index = dataset_annots["vid_index"]
             annotations = dataset_annots["annotations"]
         else:
-            with open("local_data/datasets/epic/EPIC_100_train.pkl",
-                      "rb") as p_f:
+            with open(osp.join(self.epic_root, "EPIC_100_train.pkl"), "rb") as p_f:
                 annot_df = pickle.load(p_f)
 
             # annot_df = annot_df[annot_df.video_id.str.len() == 6]
@@ -186,6 +185,9 @@ class Epic:
             annot_df = annot_df[annot_df.noun.isin(nouns)]
             # Manual selection
             annot_df = annot_df[annot_df.video_id.isin(SELECT_VIDEOS)]
+            annot_df = annot_df[
+                annot_df.video_id.apply(lambda x: SELECT_VIDEOS[x]) == annot_df.start_frame
+            ]
 
             print(f"Processing {annot_df.shape[0]} clips for nouns {nouns}")
             vid_index = []
@@ -193,11 +195,9 @@ class Epic:
             for annot_idx, (annot_key,
                             annot) in enumerate(tqdm(annot_df.iterrows())):
 
-                if annot.start_frame != SELECT_VIDEOS[annot.video_id]:
-                    continue
                 hoa_dets = epichoa.load_video_hoa(
                     annot.video_id,
-                    hoa_root="local_data/datasets/epic/hoa")
+                    hoa_root=osp.join(self.epic_root, "hoa"))
                 frame_idxs, bboxes = trackhoadf.track_hoa_df(
                     hoa_dets,
                     video_id=annot.video_id,
