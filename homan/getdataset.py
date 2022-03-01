@@ -13,6 +13,7 @@ def get_dataset(
     load_img=True,
     chunk_step=4,
     use_cache=True,
+    dataset_mode="chunk",
 ):
     if dataset == "ho3d":
         image_size = 640
@@ -22,12 +23,12 @@ def get_dataset(
             box_mode=box_mode,
             load_img=load_img,
             # mode="vid",
-            mode="chunk",
+            mode=dataset_mode,
             chunk_step=chunk_step,
             use_cache=use_cache)
     elif dataset == "epic":
         image_size = 640
-        dataset = Epic(mode="chunk",
+        dataset = Epic(mode=dataset_mode,
                        frame_nb=frame_nb,
                        frame_step=1,
                        use_cache=use_cache)
@@ -38,7 +39,7 @@ def get_dataset(
                          load_img=load_img,
                          chunk_step=chunk_step,
                          use_cache=use_cache,
-                         mode="chunk")
+                         mode=dataset_mode)
     else:
         raise ValueError(
             f"{dataset} not in [ho3d|contactpose|core50]")

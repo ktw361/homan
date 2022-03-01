@@ -2,6 +2,7 @@
 
 # pylint: disable=C0411,broad-except,too-many-statements,too-many-branches,logging-fstring-interpolation,import-error
 import argparse
+from calendar import c
 from collections import defaultdict
 import logging
 import os
@@ -43,6 +44,10 @@ def get_args():
                             "inhandycb", "ourycb"
                         ],
                         help="Dataset name")
+    parser.add_argument("--dataset_mode",
+                        default="chunk",
+                        choices=["chunk", "vid"]
+                        )
     parser.add_argument("--chunk_step",
                         default=4,
                         type=int,
@@ -182,6 +187,7 @@ def main(args):
         frame_nb=args.frame_nb,
         box_mode=args.box_mode,
         chunk_step=args.chunk_step,
+        dataset_mode=args.dataset_mode,
     )
     print(f"Processing {len(dataset)} samples")
     # Get pretrained networks
