@@ -14,8 +14,8 @@ Launch for instance with:
 import argparse
 import os
 import pickle
-
 from tqdm import tqdm
+import logging
 
 from homan.mocap import get_hand_bbox_detector
 from homan.datasets.epic import Epic
@@ -93,6 +93,9 @@ def main(args):
         images = annots['images']
         seq_idx = annots["seq_idx"]
         setup = annots["setup"]
+        if len(setup) == 1:
+            logging.info(f"Skip {annots['seq_idx'][2]} due to not enought targets.")
+            continue
         # Compute detection for sequence if not already computed
         if seq_idx not in all_boxes:
             seq_boxes = trackseq.track_sequence(

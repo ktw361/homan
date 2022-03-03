@@ -12,8 +12,10 @@ from homan.tracking import trackconv
 
 def print_track_info(tracks, track_type="object"):
     unique_tracks = tracks.track_id.unique()
-    print(f"Got {len(unique_tracks)} {track_type} tracks with ids and lengths"
-          f"{tracks.groupby('track_id').frame.nunique()}")
+    # print(f"Got {len(unique_tracks)} {track_type} tracks with ids and lengths"
+    #       f"{tracks.groupby('track_id').frame.nunique()}")
+    print(f"Got {len(unique_tracks)} {track_type} tracks with lengths \
+        {list(tracks.groupby('track_id').frame.nunique())}")
 
 
 def filter_longest_track(tracks, frame_field="frame"):
@@ -86,7 +88,8 @@ def track_hoa_df(
 
     frame_idxs, res = postprocess_hoa_df(
             tracked_obj, tracked_rh, tracked_lh,
-            rule='keep_right')
+            rule='keep_right', video_id=video_id,
+            start_frame=start_frame, end_frame=end_frame)
     return frame_idxs, res
 
 
@@ -94,7 +97,10 @@ def postprocess_hoa_df(
         tracked_obj,
         tracked_rh,
         tracked_lh,
-        rule='keep_right',
+        rule,
+        video_id: str,
+        start_frame: int,
+        end_frame: int,
         ):
     """
     Args:
@@ -110,15 +116,11 @@ def postprocess_hoa_df(
     if len(lh_tracks):
         print_track_info(lh_tracks, track_type="left hand")
     else:
-        print(
-            "No lh tracks for video_id {video_id} between {start_frame} and {end_frame}"
-        )
+        print(f"No lh tracks for video_id {video_id} between {start_frame} and {end_frame}")
     if len(rh_tracks):
         print_track_info(rh_tracks, track_type="right hand")
     else:
-        print(
-            "No rh tracks for video_id {video_id} between {start_frame} and {end_frame}"
-        )
+        print(f"No rh tracks for video_id {video_id} between {start_frame} and {end_frame}")
     start_obj_frame = tracked_obj.frame.min()
     end_obj_frame = tracked_obj.frame.max()
 
@@ -215,14 +217,8 @@ def postprocess_hoa_df_keep_right(
         ):
     obj_tracks = pd.DataFrame(tracked_obj)
     tracked_obj = filter_longest_track(obj_tracks)
-    print_track_info(tracked_obj)
     rh_tracks = pd.DataFrame(tracked_rh)
-    if len(rh_tracks):
-        print_track_info(rh_tracks, track_type="right hand")
-    else:
-        print(
-            "No rh tracks for video_id {video_id} between {start_frame} and {end_frame}"
-        )
+
     start_obj_frame = tracked_obj.frame.min()
     end_obj_frame = tracked_obj.frame.max()
 

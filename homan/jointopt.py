@@ -135,20 +135,24 @@ def optimize_hand_object(
         val for key, val in model.named_parameters()
         if ("rotation" in key) and ("mano" not in key)
     ]
-    optimizer = torch.optim.Adam([{
-        "params": rigid_parameters,
-        "lr": lr
-    }, {
-        "params": [
-            model.mano_pca_pose,
-            model.mano_betas,
-        ],
-        "lr":
-        lr * 10
-    }, {
-        "params": rotation_parameters,
-        "lr": lr * 10
-    }])
+    optimizer = torch.optim.Adam([
+        {
+            "params": rigid_parameters,
+            "lr": lr
+        },
+        {
+            "params": [
+                model.mano_pca_pose,
+                model.mano_betas,
+            ],
+            "lr":
+            lr * 10
+        },
+        {
+            "params": rotation_parameters,
+            "lr": lr * 10
+        }
+    ])
     # optimizer = torch.optim.Adam(parameters, lr=lr)
     loop = tqdm(range(num_iterations))
     loss_evolution = defaultdict(list)
@@ -174,7 +178,7 @@ def optimize_hand_object(
             Image.fromarray(front_top).save(front_top_path)
             imgs[step] = front_top_path
             optim_imgs.append(front_top)
-            print(f"Saved rendered image to {front_top_path}.")
+            # print(f"Saved rendered image to {front_top_path}.")
         optimizer.zero_grad()
         loss_dict, metric_dict = model(loss_weights=loss_weights)
         loss_dict_weighted = {

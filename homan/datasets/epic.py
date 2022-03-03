@@ -71,8 +71,35 @@ MODELS = {
 
 
 SELECT_VIDEOS = {
-        'P08_21': 13233, # (VID, start_frame)
-        }
+    # plate
+    'P08_21': 13233,  # (VID, start_frame)
+    'P01_09': 190375,
+    'P03_04': 67903,
+    'P08_21': 13233,
+    'P26_02': 9684,
+    # bottle
+    'P01_05': 33876,
+    'P02_02': 3001,
+    'P04_02': 58914,
+    'P10_04': 43492,
+    'P11_16': 17217,
+    'P11_16': 18044,
+    'P12_04': 1611,
+    'P12_04': 1740,
+    'P12_07': 488,
+    'P24_05': 45371,
+    'P24_08': 5835,
+    'P24_08': 51978,
+    # can
+    'P03_04': 834,
+    'P03_04': 916,
+    'P12_02': 14704,
+    'P12_02': 62341,
+    # cup
+    'P01_02': 3045,
+    'P01_09': 6796,
+    'P04_13': 10393,
+}
 
 
 def apply_bbox_transform(bbox, affine_trans):
@@ -128,13 +155,13 @@ class Epic:
             "open", "close"
         ],
         nouns=[
-            # "can",
-            # "cup",
+            "can",
+            "cup",
             # "phone",
             "plate",
             # "pitcher",
             # "jug",
-            # "bottle",
+            "bottle",
         ],
         box_folder="data/boxes",
         track_padding=10,

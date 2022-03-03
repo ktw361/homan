@@ -238,6 +238,7 @@ class Fitter(object):
         }
 
         # Run JOINT OPTIMIZATION
+        # mano and object poses are initialized using indep_fit_res
         model, loss_evolution, imgs = optimize_hand_object(
             person_parameters=indep_fit_res["person_parameters"],
             object_parameters=indep_fit_res["object_parameters"],
@@ -357,6 +358,50 @@ class Fitter(object):
                       hand_bboxes,
                       annots,
                       ):
+        """_summary_
+
+        Returns:
+            indep_fit_res: dict of
+                - 'person_parameters', list (len=frame_nb) of dict of
+                    N = 1
+                    - 'bboxes':		torch.Size([1, 4])
+                    - 'cams':		torch.Size([1, 3])
+                    - 'faces':		torch.Size([1, 1538, 3])
+                    - 'local_cams':		torch.Size([1, 3])
+                    - 'verts':		torch.Size([1, 778, 3])
+                    - 'verts2d':		torch.Size([1, 778, 2])
+                    - 'rotations':		torch.Size([1, 3, 3])
+                    - 'mano_pose':		torch.Size([1, 45])
+                    - 'mano_pca_pose':		torch.Size([1, 45])
+                    - 'mano_rot':		torch.Size([1, 3])
+                    - 'mano_betas':		torch.Size([1, 10])
+                    - 'mano_trans':		torch.Size([1, 3])
+                    - 'translations':		torch.Size([1, 1, 3])
+                    - 'hand_side':          ['right']
+                    - 'masks':		        torch.Size([1, 640, 640])
+                    - 'K_roi':		        torch.Size([1, 3, 3])
+                    - 'target_masks':		torch.Size([1, 256, 256])
+                    - 'square_bboxes':		torch.Size([1, 4])
+
+                - 'object_parameters': list (frame_nb) of dict of 
+                    - 'rotations':		 torch.Size([1, 3, 3])
+                    - 'translations':		 torch.Size([1, 1, 3])
+                    - 'verts_trans':		 torch.Size([1, 2160, 3])
+                    - 'target_masks':		 torch.Size([1, 256, 256])
+                    - 'K_roi':		 torch.Size([1, 1, 3, 3])
+                    - 'masks':		 torch.Size([1, 640, 640])
+                    - 'verts':		 torch.Size([1, 2160, 3])
+                    - 'full_mask':		 torch.Size([640, 640])
+                
+                - 'object_verts_can': ndarray (20, 2160, 3)
+                
+                - 'obj_faces': ndarray (20, 4120, 3)
+
+                - 'super2d_img_path': str
+                    e.g. 'results/epic/step1/samples/P08_21_0000000/detections_masks.png'
+
+            state_dict: 
+        """
         
         # Collect 2D and 3D evidence
         if resume_folder:
@@ -460,7 +505,6 @@ class Fitter(object):
         frame_nb = self.frame_nb
         image_size = self.image_size
         
-
         viz_len = min(5, frame_nb)
         with torch.no_grad():
             frontal, top_down = visualize_hand_object(model,
