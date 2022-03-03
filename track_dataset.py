@@ -16,6 +16,7 @@ import os
 import pickle
 from tqdm import tqdm
 import logging
+logging.getLogger().setLevel(logging.INFO)
 
 from homan.mocap import get_hand_bbox_detector
 from homan.datasets.epic import Epic

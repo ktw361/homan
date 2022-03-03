@@ -86,6 +86,9 @@ def track_hoa_df(
                 side="right",
             ))
 
+    if len(tracked_obj) == 0:
+        return [], None
+
     frame_idxs, res = postprocess_hoa_df(
             tracked_obj, tracked_rh, tracked_lh,
             rule='keep_right', video_id=video_id,
@@ -215,9 +218,11 @@ def postprocess_hoa_df_keep_right(
         tracked_rh,
         verbose=True,
         ):
+    if len(tracked_rh) == 0:
+        return [], None
+
     obj_tracks = pd.DataFrame(tracked_obj)
     tracked_obj = filter_longest_track(obj_tracks)
-    rh_tracks = pd.DataFrame(tracked_rh)
 
     start_obj_frame = tracked_obj.frame.min()
     end_obj_frame = tracked_obj.frame.max()
@@ -226,6 +231,9 @@ def postprocess_hoa_df_keep_right(
         tracked_rh = pd.DataFrame(tracked_rh)
         tracked_rh = tracked_rh[(tracked_rh.frame >= start_obj_frame)
                                 & (tracked_rh.frame <= end_obj_frame)]
+        if len(tracked_rh) == 0:
+            return [], None
+
         tracked_rh = filter_longest_track(tracked_rh)
         start_rh_frame = tracked_rh.frame.min()
         end_rh_frame = tracked_rh.frame.max()
