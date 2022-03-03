@@ -6,7 +6,6 @@
 Yana Hasson, Gül Varol, Ivan Laptev and Cordelia Schmid
 
 - [Project page](https://hassony2.github.io/homan.html)
-- [Paper](TODO)
 
 
 #### Table of Content

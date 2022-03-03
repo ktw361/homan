@@ -266,7 +266,6 @@ class Fitter(object):
         }
         torch.save(save_dict, os.path.join(
             self.sample_folder, "joint_fit.pt"))
-        # TODO, verify following 3 lines
         # Save initial optimization results
         # with open(indep_fit_path, "wb") as p_f:
         #     pickle.dump(indep_fit_res, p_f)

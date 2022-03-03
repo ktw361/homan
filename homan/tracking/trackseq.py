@@ -32,21 +32,22 @@ def track_sequence(images,
     detected_boxes = {item: [] for item in setup}
     for image in tqdm(images, desc="frame"):
         # Convert image or image path to numpy array
-        if isinstance(image, str):
-            image = preprocess.get_image(image, image_size)
-        if not isinstance(image, np.ndarray):
-            image = np.array(image)
+        image = preprocess.get_image(image, image_size)
+
         # Detect hands and manipulated objects using 100DOH hand-object detector
-        try:
-            bboxes = get_hand_detections(hand_detector, image)
-            # Check if the number detected hands and objects match the expected number
-            # for given dataset
-            _, computed_setup, valid_bboxes = verify.check_setup(bboxes, setup)
-            logging.info("mismatch setup")
-        except AssertionError:
+        bboxes = get_hand_detections(hand_detector, image)
+        if bboxes is None:
             # In egocentric mode, detection raises error if more then 1
             # person is detected, we ignore all detections in this case
-            warnings.warn("Got more then 1 person")
+            logging.info("Got more then 1 person, skip this video.")
+            return None
+            
+        # Check if the number detected hands and objects match the expected number
+        # for given dataset
+        is_valid, computed_setup, valid_bboxes = verify.check_setup(bboxes, setup)
+        if not is_valid:
+            logging.debug("mismatch setup")
+
         # Check if detections match dataset setup
         for item, expected_bbox_nb in setup.items():
             # Only consider detections when the number detected hand or object
@@ -68,17 +69,17 @@ def track_sequence(images,
     show_nb = 5
     if viz:
         fig, axes = plt.subplots(2, show_nb, figsize=(4 * show_nb, 8))
-    frame_idxs = np.linspace(0, len(images) - 1, show_nb).astype(np.int)
-    for show_idx, frame_idx in enumerate(frame_idxs):
-        image = images[frame_idx]
-        if isinstance(image, str):
-            image = preprocess.get_image(image, image_size)
-        axis = axes[0, show_idx]
-        axis.imshow(image)
-        axis.axis("off")
-        axis = axes[1, show_idx]
-        axis.imshow(image)
-        axis.axis("off")
+        frame_idxs = np.linspace(0, len(images) - 1, show_nb).astype(np.int)
+        for show_idx, frame_idx in enumerate(frame_idxs):
+            image = images[frame_idx]
+            if isinstance(image, str):
+                image = preprocess.get_image(image, image_size)
+            axis = axes[0, show_idx]
+            axis.imshow(image)
+            axis.axis("off")
+            axis = axes[1, show_idx]
+            axis.imshow(image)
+            axis.axis("off")
 
     # Perform tracking
     for item in setup:

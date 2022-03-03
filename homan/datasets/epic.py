@@ -156,13 +156,13 @@ class Epic:
             "open", "close"
         ],
         nouns=[
-            # "can",
-            # "cup",
-            # "phone",
+            "can",
+            "cup",
             "plate",
+            "bottle",
             # "pitcher",
             # "jug",
-            # "bottle",
+            # "phone",
         ],
         box_folder="data/boxes",
         track_padding=10,
@@ -181,8 +181,13 @@ class Epic:
         super().__init__()
         self.name = "epic"
         self.mode = mode
-        self.object_models = load_models(MODELS)
+        self.frame_step = frame_step
+        self.nouns = nouns
+        self.track_padding = track_padding
+        self.min_frame_nb = min_frame_nb
         self.epic_root = epic_root
+
+        self.object_models = load_models(MODELS)
         self.frame_template = osp.join(epic_root, "rgb_frames",
                                            "{}/{}/frame_{:010d}.jpg")
 
@@ -209,61 +214,8 @@ class Epic:
                 annot_df = pickle.load(p_f)
 
             # annot_df = annot_df[annot_df.video_id.str.len() == 6]
+            vid_index, annotations = self.compute_tracks(annot_df)
 
-            annot_df = annot_df[annot_df.noun.isin(nouns)]
-            # Manual selection
-            # annot_df = annot_df[annot_df.video_id.isin(SELECT_VIDEOS)]
-            # annot_df = annot_df[
-            #     annot_df.video_id.apply(lambda x: SELECT_VIDEOS[x]) == annot_df.start_frame
-            # ]
-
-            print(f"Processing {annot_df.shape[0]} clips for nouns {nouns}")
-            vid_index = []
-            annotations = {}
-            hoa_dets_cache = {}
-            with tqdm(total = len(annot_df)) as pbar:
-                for annot_idx, (annot_key,
-                                annot) in enumerate(annot_df.iterrows()):
-
-                    if annot.video_id not in hoa_dets_cache:
-                        hoa_dets = epichoa.load_video_hoa(
-                            annot.video_id,
-                            hoa_root=osp.join(self.epic_root, "hoa"))
-                        hoa_dets = hoa_dets[
-                            hoa_dets.left < hoa_dets.right][
-                                hoa_dets.top < hoa_dets.bottom]
-                        hoa_dets_cache[annot.video_id] = hoa_dets
-                    else:
-                        hoa_dets = hoa_dets_cache[annot.video_id]
-
-                    frame_idxs, bboxes = trackhoadf.track_hoa_df(
-                        hoa_dets,
-                        video_id=annot.video_id,
-                        start_frame=max(1, annot.start_frame - track_padding),
-                        end_frame=(min(annot.stop_frame + track_padding,
-                                    hoa_dets.frame.max() - 1)),
-                        dt=frame_step / 60,
-                    )
-                    if len(frame_idxs) > min_frame_nb:
-                        annot_full_key = (annot.video_id, annot_idx, annot_key)
-                        vid_index.append({
-                            "seq_idx": annot_full_key,
-                            "frame_nb": len(frame_idxs),
-                            "start_frame": min(frame_idxs),
-                            "object": annot.noun,
-                            "verb": annot.verb,
-                        })
-                        annotations[annot_full_key] = {
-                            "bboxes_xyxy": bboxes,
-                            "frame_idxs": frame_idxs
-                        }
-                    else:
-                        logging.info(
-                            f"Skip {annot.video_id} with num_frames = {len(frame_idxs)} < {min_frame_nb}")
-                    
-                    pbar.update(1)
-                # except Exception:
-                #     print(f"Skipping idx {annot_idx}")
             vid_index = pd.DataFrame(vid_index)
             dataset_annots = {
                 "vid_index": vid_index,
@@ -280,8 +232,8 @@ class Epic:
                                            chunk_step=frame_step,
                                            chunk_spacing=frame_step * frame_nb)
         self.chunk_index = self.chunk_index[self.chunk_index.object.isin(
-            nouns)]
-        print(f"Working with {len(self.chunk_index)} chunks for {nouns}")
+            self.nouns)]
+        print(f"Working with {len(self.chunk_index)} chunks for {self.nouns}")
 
         # Get paired links as neighboured joints
         self.links = [
@@ -291,6 +243,69 @@ class Epic:
             (0, 13, 14, 15, 16),
             (0, 17, 18, 19, 20),
         ]
+    
+    def compute_tracks(self, annot_df):
+        annot_df = annot_df[annot_df.noun.isin(self.nouns)]
+        # Manual selection
+        # annot_df = annot_df[annot_df.video_id.isin(SELECT_VIDEOS)]
+        # annot_df = annot_df[
+        #     annot_df.video_id.apply(lambda x: SELECT_VIDEOS[x]) == annot_df.start_frame
+        # ]
+
+        print(f"Processing {annot_df.shape[0]} clips for nouns {self.nouns}")
+        vid_index = []
+        annotations = {}
+        hoa_dets_cache = {}
+        TOTAL = 500
+        TOTAL = min(TOTAL, len(annot_df))  # TODO
+        with tqdm(total = TOTAL) as pbar:
+            for annot_idx, (annot_key,
+                            annot) in enumerate(annot_df.iterrows()):
+                if annot_idx > TOTAL:
+                    break
+
+                if annot.video_id not in hoa_dets_cache:
+                    hoa_dets = epichoa.load_video_hoa(
+                        annot.video_id,
+                        hoa_root=osp.join(self.epic_root, "hoa"))
+                    hoa_dets = hoa_dets[
+                        hoa_dets.left < hoa_dets.right][
+                            hoa_dets.top < hoa_dets.bottom]
+                    hoa_dets_cache[annot.video_id] = hoa_dets
+                else:
+                    hoa_dets = hoa_dets_cache[annot.video_id]
+
+                frame_idxs, bboxes = trackhoadf.track_hoa_df(
+                    hoa_dets,
+                    video_id=annot.video_id,
+                    start_frame=max(1, annot.start_frame - self.track_padding),
+                    end_frame=(min(annot.stop_frame + self.track_padding,
+                                hoa_dets.frame.max() - 1)),
+                    dt=self.frame_step / 60,
+                )
+                if len(frame_idxs) > self.min_frame_nb:
+                    annot_full_key = (annot.video_id, annot_idx, annot_key)
+                    vid_index.append({
+                        "seq_idx": annot_full_key,
+                        "frame_nb": len(frame_idxs),
+                        "start_frame": min(frame_idxs),
+                        "object": annot.noun,
+                        "verb": annot.verb,
+                    })
+                    annotations[annot_full_key] = {
+                        "bboxes_xyxy": bboxes,
+                        "frame_idxs": frame_idxs
+                    }
+                else:
+                    logging.info(
+                        f"Skip {annot.video_id} with num_frames = "
+                        f"{len(frame_idxs)} < {self.min_frame_nb}")
+                
+                pbar.update(1)
+            # except Exception:
+            #     print(f"Skipping idx {annot_idx}")
+        return vid_index, annotations
+        
 
     def get_roi(self, video_annots, frame_ids, res=640):
         """

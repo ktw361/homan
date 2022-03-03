@@ -27,7 +27,11 @@ def get_handmocap_predictor():
 
 
 def get_hand_detections(hand_detector, image):
-    _, _, hand_bbox_list, _ = hand_detector.detect_hand_bbox(image.copy())
+    # _, _, hand_bbox_list, _ = hand_detector.detect_hand_bbox(image.copy())
+    output = hand_detector.detect_hand_bbox(image.copy())
+    if output is None:
+        return None
+    _, _, hand_bbox_list, _ = output
     return hand_bbox_list
 
 

@@ -46,6 +46,7 @@ def get_args():
         default="data/boxes",
         help="Location where to save the tracked bounding boxes")
     parser.add_argument("--save_folder", default="tracks")
+    parser.add_argument("--viz", default=False, action="store_true")
     args = parser.parse_args()
     return args
 
@@ -106,7 +107,11 @@ def main(args):
                 setup=setup,
                 sample_idx=sample_idx,
                 save_folder=args.save_folder,
+                viz=args.viz,
             )
+            if seq_boxes is None:
+                # trackseq.py#L43, more than 1 person
+                continue
 
             all_boxes[seq_idx] = seq_boxes
 

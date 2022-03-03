@@ -6,6 +6,7 @@ import numpy as np
 
 
 def get_image(image, image_size):
+    """ return numpy ndarray """
     if isinstance(image, np.ndarray):
         image = Image.fromarray(image)
     elif isinstance(image, str):
