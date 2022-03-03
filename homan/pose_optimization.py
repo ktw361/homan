@@ -355,7 +355,7 @@ def find_optimal_pose(
             best_loss_single = losses[ind]
             best_rots_single = model.rotations[ind].detach().clone()
             best_trans_single = model.translations[ind].detach().clone()
-        loop.set_description(f"loss: {best_loss_single.item():.3g}")
+        loop.set_description(f"obj loss: {best_loss_single.item():.3g}")
         loop.update()
     if best_rots is None:
         best_rots = model.rotations

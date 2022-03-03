@@ -191,7 +191,7 @@ def optimize_hand_object(
             loss_evolution[k].append(val)
         loss = sum(loss_dict_weighted.values())
         loss_evolution["loss"].append(loss.item())
-        loop.set_description(f"Loss {loss.item():.4f}")
+        loop.set_description(f"Joint-Opt Loss {loss.item():.4f}")
         loss.backward()
         optimizer.step()
     optim_imgs = [optim_imgs[0] for _ in range(30)
