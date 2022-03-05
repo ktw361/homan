@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-from homan.datasets import collate, epichoa, tarutils
+from homan.datasets import collate, epichoa, tarutils, epic_hdf5
 from homan.datasets.chunkvids import chunk_vid_index
 from homan.tracking import trackhoa as trackhoadf
 from homan.utils import bbox as bboxutils
@@ -145,6 +145,7 @@ class Epic:
         self,
         joint_nb=21,
         use_cache=False,
+        hdf5_root=None,
         mano_root="extra_data/mano",
         mode="frame",
         ref_idx=0,
@@ -167,7 +168,8 @@ class Epic:
         box_folder="data/boxes",
         track_padding=10,
         min_frame_nb=20,
-        epic_root="/home/skynet/Zhifan/datasets/epic",  # stupid intellisense can't exclude files, fuck you
+        epic_root="/home/skynet/Zhifan/datasets/epic", 
+        valid_vids_path='/home/skynet/Zhifan/data/allVideos.xlsx',
     ):
         """
         Arguments:
@@ -177,6 +179,9 @@ class Epic:
             frame_step (int): Number of frames to skip between two selected images
             verbs (list): subset of action verbs to consider
             nouns (list): subset of action verbs to consider
+            valid_vids_path: str, the path to .xlsx file 
+                that stores videos with segmentation annotation
+
         """
         super().__init__()
         self.name = "epic"
@@ -188,8 +193,23 @@ class Epic:
         self.epic_root = epic_root
 
         self.object_models = load_models(MODELS)
-        self.frame_template = osp.join(epic_root, "rgb_frames",
+        if hdf5_root is not None:
+            self.hdf5_reader = epic_hdf5.EpicHdf5Reader(hdf5_root)
+            def _read_frame(video_id, frame_idx):
+                return self.hdf5_reader.read_frame_pil(video_id, f"frame_{frame_idx:010d}")
+        else:
+            self.frame_template = osp.join(epic_root, "rgb_frames",
                                            "{}/{}/frame_{:010d}.jpg")
+            def _read_frame(video_id, frame_idx):
+                img_path = self.frame_template.format(
+                        video_id[:3], video_id, frame_idx)
+                # img = self.tareader.read_tar_frame(img_path)
+                img = cv2.imread(img_path)
+                img = cv2.resize(img,
+                                self.image_size)
+                img = Image.fromarray(img[:, :, ::-1])
+                return img
+        self._read_frame = _read_frame
 
         self.resize_factor = 3
         self.frame_nb = frame_nb
@@ -212,8 +232,18 @@ class Epic:
         else:
             with open(osp.join(self.epic_root, "EPIC_100_train.pkl"), "rb") as p_f:
                 annot_df = pickle.load(p_f)
+            valid_vids = pd.read_excel(valid_vids_path)
 
-            # annot_df = annot_df[annot_df.video_id.str.len() == 6]
+            # 1. Select video with gt segs
+            annot_df = annot_df[annot_df.video_id.isin(valid_vids['Unnamed: 0'])]
+            # 2. Select interested sub-sequence
+            annot_df = annot_df[annot_df.noun.isin(self.nouns)]
+            # Manual selection
+            # annot_df = annot_df[annot_df.video_id.isin(SELECT_VIDEOS)]
+            # annot_df = annot_df[
+            #     annot_df.video_id.apply(lambda x: SELECT_VIDEOS[x]) == annot_df.start_frame
+            # ]
+            print(f"Processing {annot_df.shape[0]} clips for nouns {self.nouns}")
             vid_index, annotations = self.compute_tracks(annot_df)
 
             vid_index = pd.DataFrame(vid_index)
@@ -245,24 +275,14 @@ class Epic:
         ]
     
     def compute_tracks(self, annot_df):
-        annot_df = annot_df[annot_df.noun.isin(self.nouns)]
-        # Manual selection
-        # annot_df = annot_df[annot_df.video_id.isin(SELECT_VIDEOS)]
-        # annot_df = annot_df[
-        #     annot_df.video_id.apply(lambda x: SELECT_VIDEOS[x]) == annot_df.start_frame
-        # ]
-
-        print(f"Processing {annot_df.shape[0]} clips for nouns {self.nouns}")
         vid_index = []
         annotations = {}
         hoa_dets_cache = {}
-        TOTAL = 500
-        TOTAL = min(TOTAL, len(annot_df))  # TODO
+        TOTAL = len(annot_df)
+        # TOTAL = min(5, len(annot_df))
         with tqdm(total = TOTAL) as pbar:
             for annot_idx, (annot_key,
                             annot) in enumerate(annot_df.iterrows()):
-                if annot_idx > TOTAL:
-                    break
 
                 if annot.video_id not in hoa_dets_cache:
                     hoa_dets = epichoa.load_video_hoa(
@@ -364,13 +384,7 @@ class Epic:
         roi, affine_trans = self.get_roi(vid_info, frame_ids)
         for frame_id in frame_ids:
             frame_idx = seq_frame_idxs[frame_id]
-            img_path = self.frame_template.format(
-                    video_id[:3], video_id, frame_idx)
-            # img = self.tareader.read_tar_frame(img_path)
-            img = cv2.imread(img_path)
-            img = cv2.resize(img,
-                             self.image_size)
-            img = Image.fromarray(img[:, :, ::-1])
+            img = self._read_frame(video_id, frame_idx)
 
             img = handutils.transform_img(img, affine_trans, [res, res])
             images.append(img)

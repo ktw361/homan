@@ -47,6 +47,13 @@ def get_args():
         help="Location where to save the tracked bounding boxes")
     parser.add_argument("--save_folder", default="tracks")
     parser.add_argument("--viz", default=False, action="store_true")
+    parser.add_argument("--hdf5_root",
+                        default=None, 
+                        help="For epic, set to <hdf5_rgb_frames> to use HDF5 reader")
+    parser.add_argument("--epic_root", 
+                        default="/home/skynet/Zhifan/datasets/epic")
+    parser.add_argument("--epic_valid_path", 
+                        default='/home/skynet/Zhifan/data/allVideos.xlsx')
     args = parser.parse_args()
     return args
 
@@ -74,7 +81,14 @@ def main(args):
         )
         image_size = 350
     elif args.dataset == "epic":
-        dataset = Epic(mode="vid", frame_nb=-1, use_cache=args.use_cache)
+        dataset = Epic(
+            mode="vid", 
+            frame_nb=-1, 
+            use_cache=args.use_cache,
+            hdf5_root=args.hdf5_root,
+            epic_root=args.epic_root,
+            valid_vids_path=args.epic_valid_path,
+            )
         image_size = 640
     else:
         raise ValueError(f"{args.dataset} not in ['core50','epic','ho3d']")

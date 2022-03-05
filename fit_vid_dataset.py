@@ -44,6 +44,12 @@ def get_args():
                             "inhandycb", "ourycb"
                         ],
                         help="Dataset name")
+    parser.add_argument("--epic_hdf5_root",
+                        default=None)
+    parser.add_argument("--epic_root", 
+                        default="/home/skynet/Zhifan/datasets/epic")
+    parser.add_argument("--epic_valid_path", 
+                        default='/home/skynet/Zhifan/data/allVideos.xlsx')
     parser.add_argument("--dataset_mode",
                         default="chunk",
                         choices=["chunk", "vid"]
@@ -666,6 +672,9 @@ def main(args):
         box_mode=args.box_mode,
         chunk_step=args.chunk_step,
         dataset_mode=args.dataset_mode,
+        epic_hdf5_root=args.epic_hdf5_root,
+        epic_root=args.epic_root,
+        epic_valid_path=args.epic_valid_path,
     )
     print(f"Processing {len(dataset)} samples")
 

@@ -14,6 +14,9 @@ def get_dataset(
     chunk_step=4,
     use_cache=True,
     dataset_mode="chunk",
+    epic_hdf5_root=None,
+    epic_root="",
+    epic_valid_path="",
 ):
     if dataset == "ho3d":
         image_size = 640
@@ -31,7 +34,11 @@ def get_dataset(
         dataset = Epic(mode=dataset_mode,
                        frame_nb=frame_nb,
                        frame_step=1,
-                       use_cache=use_cache)
+                       use_cache=use_cache,
+                       hdf5_root=epic_hdf5_root,
+                       epic_root=epic_root,
+                       valid_vids_path=epic_valid_path)
+                       
     elif dataset == "core50":
         image_size = 350
         dataset = Core50(frame_nb=frame_nb,
