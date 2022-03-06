@@ -2,9 +2,9 @@
 
 # pylint: disable=C0411,broad-except,too-many-statements,too-many-branches,logging-fstring-interpolation,import-error
 import argparse
-from calendar import c
 from collections import defaultdict
 import logging
+import tqdm
 import os
 import pickle
 
@@ -691,26 +691,34 @@ def main(args):
         smpl_path=args.smpl_path,
     )
 
-    for sample_idx in range(args.data_offset, len(dataset), args.data_step):
+    for sample_idx in tqdm.trange(args.data_offset, len(dataset), args.data_step):
         # Prepare sample folder
         seq_idx = dataset.chunk_index.iloc[sample_idx]['seq_idx']
-        if dataset.name == 'epic':  # (video_id, _, _)
-            seq_idx = seq_idx[0]
+        annots = dataset[sample_idx]
+        if dataset.name == 'epic':
+            video_id = seq_idx[0]  # seq_idx = (video_id, _, _)
+            start_frame = annots['frame_idxs'][0]
+            sample_folder = os.path.join(args.result_root, "samples",
+                                        f"{video_id}_{start_frame}")
+        else:
+            sample_folder = os.path.join(args.result_root, "samples",
+                                        f"{seq_idx}_{sample_idx:08d}")
         if args.seq_idx:
             if seq_idx != args.seq_idx:
                 continue
-        sample_folder = os.path.join(args.result_root, "samples",
-                                     f"{seq_idx}_{sample_idx:08d}")
         fitter._set_paths(sample_folder, args.result_root)
         if args.only_missing and os.path.exists(fitter.check_path):
             print(f"Skipping existing {fitter.sample_path}")
             continue
 
-        annots = dataset[sample_idx]
         resume_folder = None
         if args.resume:
-            resume_folder = os.path.join(args.resume, "samples",
-                                        f"{seq_idx}_{sample_idx:08d}")
+            if dataset.name == 'epic':
+                resume_folder = os.path.join(args.resume, "samples",
+                                            f"{video_id}_{start_frame}")
+            else:
+                resume_folder = os.path.join(args.resume, "samples",
+                                            f"{seq_idx}_{sample_idx:08d}")
 
         fitter.fit_single_annot(annots, args, resume_folder)
 

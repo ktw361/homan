@@ -141,6 +141,40 @@ def load_models(MODELS, normalize=True):
 
 
 class Epic:
+
+    """
+    Structure of 
+        - self.vid_index: DataFrame
+                    seq_idx              | frame_nb | start_frame | object | verb
+            eg. (P01_01, 0, P01_01_100)  | 45       | 28802       | cup    | take
+
+            where the 'seq_idx' = (video_id, annot_idx, narration_id)
+
+        - self.annotations: dict, len == len(self.vid_index)
+            - key:  seq_idx of self.vid_index
+            - value: dict with
+                - 'bboxes_xyxy':  dict with
+                    - 'objects':    ndarray (frame_nb, 4)
+                    - 'right_hand': ndarray (frame_nb, 4)
+                - 'frame_idxs': list of len frame_nb
+                    [start_frame, start_frame + 1, ..., start_frame + frame_nb - 1]
+        
+        - self.chunk_index: (example: chunk_size=10, chunk_step=1)
+                    seq_idx              | frame_nb | start_frame | object | verb | frame_idxs
+            eg. (P01_01, 0, P01_01_100)  | 45       | 28802       | cup    | take | [0, 1, ..., 9]
+                (P01_01, 0, P01_01_100)  | 45       | 28802       | cup    | take | [10, 11, ..., 19]
+
+    
+    Loading example:
+    Originally, len(annot_df) = 67217;
+    after filter valid segmentation,    len(annot_df) = 9022
+    after filter with nouns,            len(annot_df) = 301     <- annot_idx
+    after computer_tracks(), where short tracks are removed
+                                        len(annot_df) = 257
+    after chunking (split tracks into smaller sequences),
+                                        len(chunk_index) = 2799
+    """
+
     def __init__(
         self,
         joint_nb=21,
@@ -198,7 +232,7 @@ class Epic:
             def _read_frame(video_id, frame_idx):
                 return self.hdf5_reader.read_frame_pil(video_id, f"frame_{frame_idx:010d}")
         else:
-            self.frame_template = osp.join(epic_root, "rgb_frames",
+            self.frame_template = osp.join(epic_root, "rgb_root",
                                            "{}/{}/frame_{:010d}.jpg")
             def _read_frame(video_id, frame_idx):
                 img_path = self.frame_template.format(
@@ -352,6 +386,46 @@ class Epic:
         return roi_bbox, affine_trans
 
     def __getitem__(self, idx):
+        """
+        Returns:
+
+        - when self.mode == 'vid':
+            ...
+
+        - when self.mode == 'chunk':
+            dict of 
+                - 'hands': list of len 1(why?) dict of
+                    - 'verts3d':    (N, 788, 3)
+                    - 'faces':      (N, 1538, 3)
+                    - 'label':      str, one of {'left_hand', 'right_hand'}
+                    - 'bbox':       (N, 4)
+
+                - 'objects': list of len 1 dict of
+                    - 'verts3d':    (N, V_o, 3)
+                    - 'faces':      (N, F_o, 3)
+                    - 'path':       list of len N path, 
+                        e.g. ['data/cache/models/cup.obj', ...]
+                    - 'canverts3d': (N, V_o, 3)
+                    - 'bbox':       (N, 4)
+
+                - 'camera': dict of 
+                    - 'resolution': list of len N list [rx, ry],
+                        e.g. [[640, 640] * N]
+                    - 'K':          (N, 3, 3)
+
+                - 'setup': dict,
+                    e.g. {'objects': 1, 'right_hand': 1}
+
+                - 'frame_idxs': list of len N true frame index
+                    e.g. [28802, 28803, ..., 28811]
+
+                - 'images': list of len N PIL.Images
+                - 'seq_idx': tuple of (video_id, annot_idx, narration_id)
+            
+            where N = self.frame_nb, (e.g. 10),
+            all data are ndarray
+
+        """
         if self.mode == "vid":
             return self.get_vid_info(idx, mode="full_vid")
         elif self.mode == "chunk":
