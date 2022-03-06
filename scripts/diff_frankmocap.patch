@@ -1,0 +1,26 @@
+diff --git a/handmocap/hand_bbox_detector.py b/handmocap/hand_bbox_detector.py
+index 4e120d5..1ff122b 100644
+--- a/handmocap/hand_bbox_detector.py
++++ b/handmocap/hand_bbox_detector.py
+@@ -332,8 +332,10 @@ class Ego_Centric_Detector(BodyPoseEstimator):
+         obj_bboxes = self.__get_raw_obj_bbox(scores, pred_boxes)
+ 
+         if hand_bboxes is not None:
+-            assert hand_bboxes.shape[
+-                0] <= 2, "Ego centric version only supports one person per image"
++            # assert hand_bboxes.shape[
++            #     0] <= 2, "Ego centric version only supports one person per image"
++            if hand_bboxes.shape[0] > 2:
++                return None
+ 
+             left_bbox = hand_bboxes[hand_types == 0]
+             if len(left_bbox) > 0:
+@@ -386,6 +388,8 @@ class HandBboxDetector(object):
+             raw_hand_bboxes: list of raw hand detection, each element is [min_x, min_y, width, height]
+         """
+         output = self.model.detect_hand_bbox(img_bgr)
++        if output is None:
++            return None
+         body_pose_list, body_bbox_list, hand_bbox_list, raw_hand_bboxes = output
+ 
+         # convert raw_hand_bboxes from (x0, y0, x1, y1) to (x0, y0, w, h)
