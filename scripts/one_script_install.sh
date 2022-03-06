@@ -12,3 +12,4 @@ pip install external/multiperson/sdf
 
 git clone https://github.com/hassony2/frankmocap.git external/frankmocap
 sh scripts/install_frankmocap.sh
+cd external/frankmocap && git apply ../../scripts/diff_frankmocap.patch && cd ../..

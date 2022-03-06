@@ -693,7 +693,7 @@ def main(args):
     rng = range(args.data_offset, len(dataset), args.data_step)
     total = len(rng)
     for sample_idx in rng:
-        logging.info(f"processing {sample_idx}/{total}")
+        logging.info(f"processing {sample_idx//args.data_step}/{total}")
         # Prepare sample folder
         seq_idx = dataset.chunk_index.iloc[sample_idx]['seq_idx']
         annots = dataset[sample_idx]
