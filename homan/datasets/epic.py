@@ -32,18 +32,18 @@ MODELS = {
         # "02876657/d851cbc873de1c4d3b6eb309177a6753/models/model_normalized_proc.obj",
         "scale": 0.2,
     },
-    "jug": {
-        "path":
-        # "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
-        '/media/eve/DATA/Zhifan/YCB_Video_Models/models/019_pitcher_base/textured_simple.obj',
-        "scale": 0.25,
-    },
-    "pitcher": {
-        "path":
-        # "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
-        '/media/eve/DATA/Zhifan/YCB_Video_Models/models/019_pitcher_base/textured_simple.obj',
-        "scale": 0.25,
-    },
+    # "jug": {
+    #     "path":
+    #     # "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+    #     '/media/eve/DATA/Zhifan/YCB_Video_Models/models/019_pitcher_base/textured_simple.obj',
+    #     "scale": 0.25,
+    # },
+    # "pitcher": {
+    #     "path":
+    #     # "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+    #     '/media/eve/DATA/Zhifan/YCB_Video_Models/models/019_pitcher_base/textured_simple.obj',
+    #     "scale": 0.25,
+    # },
     "plate": {
         "path": "data/cache/models/plate.obj",
         # "path": SHAPENET_PATH+

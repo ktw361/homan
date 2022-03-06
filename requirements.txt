@@ -14,6 +14,9 @@ smplx
 tqdm
 transforms3d
 trimesh
+pudb
+h5py
+openpyxl
 git+https://github.com/hassony2/chumpy.git
 git+https://github.com/hassony2/MANO.git
 git+https://github.com/hassony2/manopth.git@return_centerjoint

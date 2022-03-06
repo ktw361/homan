@@ -55,9 +55,9 @@ class EpicHdf5Reader(object):
 
 def make_hdf5_dataset(
     valid_vids_path='/home/deepthought/Zhifan/allVideos.xlsx',
-    epic_rgb_frames=Path('/home/skynet/Zhifan/data/epic/rgb_frames/'),
+    epic_rgb_root=Path('/home/skynet/Zhifan/data/epic/rgb_root/'),
     all_annotations='/home/skynet/Zhifan/data/epic/EPIC_100_train.pkl',
-    save_dir='save_dir'
+    save_dir='epic_hdf5_root'
 ):
 
     with open(all_annotations, 'rb') as fp:
@@ -79,17 +79,16 @@ def make_hdf5_dataset(
     annot_df = annot_df[annot_df.video_id.isin(valid_vids['Unnamed: 0'])]
     annot_df = annot_df[annot_df.noun.isin(nouns)]
 
+    track_padding = 51  # make sure to include more frames
+
     for _, annot in tqdm.tqdm(annot_df.iterrows(), total=len(annot_df)):
         video_id = annot.video_id
-        if video_id == 'P06_07':
-            continue
         pid = video_id.split('_')[0]
-        vid_root = epic_rgb_frames/pid/video_id
+        vid_root = epic_rgb_root/pid/video_id
         start_frame, end_frame = annot['start_frame'], annot['stop_frame']
-        # frames = os.listdir(vid_root)
         with h5py.File(f'./{save_dir}/{video_id}.hdf5', 'a') as f:
-            for frame_idx in tqdm.tqdm(range(start_frame, end_frame+1)):
-            # for frame_idx in range(start_frame, end_frame+1):
+            for frame_idx in tqdm.tqdm(
+                range(start_frame-track_padding, end_frame+track_padding)):
                 frame = f'frame_{frame_idx:010d}'
                 if frame in f.keys():
                     continue
@@ -97,3 +96,7 @@ def make_hdf5_dataset(
                 with open(imgpath, 'rb') as img_f:
                     img_bin = img_f.read()
                     f.create_dataset(frame, data=np.asarray(img_bin))
+
+
+if __name__ == '__main__':
+    make_hdf5_dataset()
