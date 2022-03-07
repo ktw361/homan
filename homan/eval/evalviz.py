@@ -7,7 +7,7 @@ from moviepy import editor
 def make_gif(img_paths, gif_path, fps=2):
     img_paths = [str(path) for path in img_paths]
     clip = editor.ImageSequenceClip(img_paths, fps=fps)
-    clip.write_gif(gif_path)
+    clip.write_gif(gif_path, logger=None)
 
 
 def make_video(img_paths, video_path, fps=2, resize_factor=1):
@@ -27,7 +27,7 @@ def make_video(img_paths, video_path, fps=2, resize_factor=1):
     else:
         imgs = img_paths
     clip = editor.ImageSequenceClip(imgs, fps=fps)
-    clip.write_videofile(str(video_path))
+    clip.write_videofile(str(video_path), logger=None)
 
 
 def make_video_np(imgs, video_path, resize_factor=1, fps=4):
@@ -44,4 +44,4 @@ def make_video_np(imgs, video_path, resize_factor=1, fps=4):
             resize_imgs.append(img)
         imgs = resize_imgs
     clip = editor.ImageSequenceClip(imgs, fps=fps)
-    clip.write_videofile(str(video_path))
+    clip.write_videofile(str(video_path), logger=None)

@@ -248,10 +248,10 @@ def find_optimal_pose(
         torch.Tensor(K).unsqueeze(0), torch.tensor([[x, y, x + b, y + b]]),
         [REND_SIZE]).cuda()
     # Stuff to keep around
-    best_losses = np.inf
+    best_losses = torch.tensor(np.inf)
     best_rots = None
     best_trans = None
-    best_loss_single = np.inf
+    best_loss_single = torch.tensor(np.inf)
     best_rots_single = None
     best_trans_single = None
     loop = tqdm(total=num_iterations)

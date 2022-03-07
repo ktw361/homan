@@ -6,6 +6,7 @@ from collections import defaultdict
 import logging
 import os
 import pickle
+from random import sample
 
 import cv2
 import numpy as np
@@ -690,10 +691,8 @@ def main(args):
         smpl_path=args.smpl_path,
     )
 
-    rng = range(args.data_offset, len(dataset), args.data_step)
-    total = len(rng)
-    for sample_idx in rng:
-        logging.info(f"processing {sample_idx//args.data_step}/{total}")
+    for sample_idx in range(args.data_offset, len(dataset), args.data_step):
+        logging.info(f"processing {sample_idx}/{len(dataset)}")
         # Prepare sample folder
         seq_idx = dataset.chunk_index.iloc[sample_idx]['seq_idx']
         annots = dataset[sample_idx]
@@ -705,6 +704,7 @@ def main(args):
         else:
             sample_folder = os.path.join(args.result_root, "samples",
                                         f"{seq_idx}_{sample_idx:08d}")
+        logging.info(f"result will be saved to {sample_folder}")
         if args.seq_idx:
             if seq_idx != args.seq_idx:
                 continue
