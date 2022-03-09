@@ -42,7 +42,8 @@ def get_frame_infos(images_np,
                     obj_bboxes=None,
                     camintr=None,
                     debug=True,
-                    image_size=640):
+                    image_size=640,
+                    super2d_step=10):
     """
     Arguments:
         images_np (list[np.ndarray]): List of input images
@@ -96,7 +97,7 @@ def get_frame_infos(images_np,
                                          sample_folder=sample_folder,
                                          save=False)
             super2d_imgs.append(super2d_img)
-        super2d_imgs = np.concatenate(super2d_imgs[::len(super2d_imgs) // 10],
+        super2d_imgs = np.concatenate(super2d_imgs[::len(super2d_imgs) // super2d_step],
                                       1)
     return person_parameters, obj_mask_infos, super2d_imgs
 

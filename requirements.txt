@@ -14,7 +14,7 @@ smplx
 tqdm
 transforms3d
 trimesh
-pudb
+pudb==2022.1
 h5py
 openpyxl
 git+https://github.com/hassony2/chumpy.git

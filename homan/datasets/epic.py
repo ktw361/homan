@@ -230,14 +230,16 @@ class Epic:
         if hdf5_root is not None:
             self.hdf5_reader = epic_hdf5.EpicHdf5Reader(hdf5_root)
             def _read_frame(video_id, frame_idx):
-                return self.hdf5_reader.read_frame_pil(video_id, f"frame_{frame_idx:010d}")
+                img = self.hdf5_reader.read_frame_np(video_id, f"frame_{frame_idx:010d}")
+                img = cv2.resize(img, self.image_size)
+                img = Image.fromarray(img)
+                return img
         else:
             self.frame_template = osp.join(epic_root, "rgb_root",
                                            "{}/{}/frame_{:010d}.jpg")
             def _read_frame(video_id, frame_idx):
                 img_path = self.frame_template.format(
                         video_id[:3], video_id, frame_idx)
-                # img = self.tareader.read_tar_frame(img_path)
                 img = cv2.imread(img_path)
                 img = cv2.resize(img,
                                 self.image_size)
@@ -509,7 +511,6 @@ class Epic:
         if has_right:
             bbox = bbox_infos['right_hand'][frame] / self.resize_factor
             bbox = apply_bbox_transform(bbox, affine_trans)
-            verts = np.random.random()
             verts = (np.random.rand(778, 3) * 0.2) + np.array([0, 0, 0.6])
             faces = self.faces["right"]
             hand_info = dict(
