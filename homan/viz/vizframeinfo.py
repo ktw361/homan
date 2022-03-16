@@ -9,14 +9,16 @@ from libyana.visutils import vizmp
 from homan.utils.bbox import bbox_xy_to_wh, bbox_wh_to_xy, make_bbox_square
 
 
-def viz_frame_info(frame_info, sample_folder="tmp", save=True):
+def viz_frame_info(person_parameters=None,
+                   obj_mask_infos=None,
+                   image=None,
+                   sample_folder="tmp", 
+                   save=True):
     plt.close()
     fig, axes = plt.subplots(3, 1, figsize=(3, 8))
-    image = frame_info['image']
-    obj_infos = frame_info["obj_mask_infos"]
-    if "person_parameters" in frame_info and len(
-            frame_info["person_parameters"]):
-        person_params = frame_info["person_parameters"]
+    obj_infos = obj_mask_infos
+    if person_parameters is not None and len(person_parameters):
+        person_params = person_parameters
     else:
         person_params = None
     mask_bboxes = obj_infos["bbox"]

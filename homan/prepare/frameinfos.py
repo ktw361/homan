@@ -43,7 +43,7 @@ def get_frame_infos(images_np,
                     camintr=None,
                     debug=True,
                     image_size=640,
-                    super2d_step=10):
+                    super2d_step=1):
     """
     Arguments:
         images_np (list[np.ndarray]): List of input images
@@ -79,7 +79,7 @@ def get_frame_infos(images_np,
                 key: boxes[image_idx]
                 for key, boxes in hand_bboxes.items() if boxes is not None
             }
-            frame_info = get_frame_info(
+            _person_parameters, _obj_mask_infos, _image = get_frame_info(
                 image,
                 hand_predictor,
                 mask_extractor,
@@ -91,9 +91,11 @@ def get_frame_infos(images_np,
                 debug=debug and (image_idx == len(images_np) // 2),
                 image_size=image_size,
             )
-            person_parameters.append(frame_info["person_parameters"])
-            obj_mask_infos.append(frame_info["obj_mask_infos"])
-            super2d_img = viz_frame_info(frame_info,
+            person_parameters.append(_person_parameters)
+            obj_mask_infos.append(_obj_mask_infos)
+            super2d_img = viz_frame_info(_person_parameters,
+                                         _obj_mask_infos,
+                                         _image,
                                          sample_folder=sample_folder,
                                          save=False)
             super2d_imgs.append(super2d_img)
@@ -102,15 +104,14 @@ def get_frame_infos(images_np,
     return person_parameters, obj_mask_infos, super2d_imgs
 
 
-def get_frame_info(image,
-                   hand_predictor=None,
-                   mask_extractor=None,
-                   sample_folder=None,
-                   hand_bboxes=None,
-                   obj_bboxes=None,
-                   camintr=None,
-                   debug=True,
-                   image_size=640):
+def get_person_params(image,
+                      hand_predictor=None,
+                      mask_extractor=None,
+                      sample_folder=None,
+                      hand_bboxes=None,
+                      camintr=None,
+                      debug=True,
+                      image_size=640):
     """
     Regress frame hand pose and hand+object masks
 
@@ -172,6 +173,34 @@ def get_frame_info(image,
         else:
             person_parameters[key] = torch.cat(
                 [param[key] for param in all_parameters])
+    
+    return person_parameters
+
+
+def get_frame_info(image,
+                   hand_predictor=None,
+                   mask_extractor=None,
+                   sample_folder=None,
+                   hand_bboxes=None,
+                   obj_bboxes=None,
+                   camintr=None,
+                   debug=True,
+                   image_size=640):
+    """
+    Regress frame hand pose and hand+object masks
+
+    Arguments:
+        image (np.ndarray): hand-object image
+        hand_bboxes (list): [{'left_hand': np.array(4,), 'right_hand': np.array(4,)}, ...] in xywh format
+        hand_predictor: Hand pose regressor
+        mask_extractor: Instance segmentor
+    Returns:
+        frame_infos (tuple): (person_parameters, obj_mask_infos, image)
+    """
+    person_parameters = get_person_params(
+        image, hand_predictor, mask_extractor,
+        sample_folder, hand_bboxes, camintr, debug, image_size)
+
     # Handling only 1 object
     obj_mask_infos = mask_extractor.masks_from_bboxes(
         image,
@@ -189,14 +218,8 @@ def get_frame_info(image,
     target_masks = maskutils.add_occlusions([obj_mask_infos["crop_mask"]],
                                             hand_occlusions,
                                             [obj_mask_infos["square_bbox"]])[0]
-    obj_mask_infos["target_crop_mask"] = target_masks
-    frame_infos = dict(
-        person_parameters=person_parameters,
-        obj_mask_infos=obj_mask_infos,
-        image=image,
-    )
-
-    return frame_infos
+    obj_mask_infos["target_crop_mask"] = target_masks  # This will be the 'ref_image' of PoseOptimizer
+    return person_parameters, obj_mask_infos, image
 
 
 def get_gt_infos(images_np,

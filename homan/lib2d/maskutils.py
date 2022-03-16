@@ -21,6 +21,12 @@ def add_occlusions(masks, occluder_mask, mask_bboxes):
         occluder_mask (torch.Tensor): [B, IMAGE_SIZE, IMAGE_SIZE] occluder where B
             dim aggregates different one-hot encodings of occluder
             masks
+    
+    Returns:
+        masks: list of (REND_SIZE, REND_SIZE) with
+            -1: hand region (occluder)
+            0:  background
+            1:  object (masks)
     """
     occluded_masks = []
     for mask, mask_bbox in zip(masks, mask_bboxes):
