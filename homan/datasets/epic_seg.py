@@ -89,7 +89,8 @@ class EpicSegGT(object):
         with open(self.path_map[video_id]) as fp:
             data = json.load(fp)
 
-        kwargs = dict(hei=self.image_hei, wid=self.image_wid)
+        kwargs = dict(
+            hei=self.image_hei, wid=self.image_wid, video_id=video_id)
         for frame_data in data:
             frame_name = frame_data['documents'][0]['name']  # length-1 documents
             frame_ind = int(frame_name.split('.')[0].split('_')[-1])
@@ -248,8 +249,14 @@ class Helper:
         hei, wid = kwargs['hei'], kwargs['wid']
         polygons = []
         for segment in segments:
-            pts = np.asarray(segment, np.int32).reshape((-1, 1, 2))
+            pts = np.asarray(segment, np.float32).reshape((-1, 1, 2))
             polygons.append(pts)
+
+        if kwargs['video_id'] in {"P12_01", "P12_02", "P12_03", "P12_04"}:
+            scale = np.array([wid / 1280, hei / 720], dtype=np.float32).reshape((1, 1, 2))
+        else:
+            scale = 1.0
+        polygons = [(p * scale).astype(np.int32) for p in polygons ]
         mask = np.zeros([hei, wid], dtype=np.int32)
         mask = cv2.fillPoly(mask, polygons, (1,))
         return mask
