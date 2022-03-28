@@ -33,7 +33,7 @@ def get_dataset(
         image_size = 640
         dataset = Epic(mode=dataset_mode,
                        frame_nb=frame_nb,
-                       frame_step=1, # TODO(zhifan, Mar 06): change this?
+                       frame_step=chunk_step,
                        use_cache=use_cache,
                        hdf5_root=epic_hdf5_root,
                        epic_root=epic_root,

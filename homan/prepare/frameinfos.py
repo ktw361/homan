@@ -99,8 +99,12 @@ def get_frame_infos(images_np,
                                          sample_folder=sample_folder,
                                          save=False)
             super2d_imgs.append(super2d_img)
-        super2d_imgs = np.concatenate(super2d_imgs[::len(super2d_imgs) // super2d_step],
-                                      1)
+        # super2d_imgs = np.concatenate(super2d_imgs[::len(super2d_imgs) // super2d_step],
+        if len(super2d_imgs) == 1:
+            super2d_imgs = super2d_imgs[0]
+        else:
+            super2d_imgs = np.concatenate(
+                super2d_imgs[0:len(super2d_imgs):super2d_step], 1)
     return person_parameters, obj_mask_infos, super2d_imgs
 
 
@@ -190,7 +194,7 @@ def get_frame_info(image,
     Regress frame hand pose and hand+object masks
 
     Arguments:
-        image (np.ndarray): hand-object image
+        image (np.ndarray): expanded hand-object image
         hand_bboxes (list): [{'left_hand': np.array(4,), 'right_hand': np.array(4,)}, ...] in xywh format
         hand_predictor: Hand pose regressor
         mask_extractor: Instance segmentor

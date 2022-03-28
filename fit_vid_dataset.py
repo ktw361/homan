@@ -333,7 +333,7 @@ class Fitter(object):
 
         # Get hand detections and make them square
         hand_bboxes = {}
-        hand_expansion = 0.1
+        hand_expansion = 1
         if len(left_hands) > 0:
             hand_bboxes["left_hand"] = make_bbox_square(
                 bbox_xy_to_wh(left_hands[0]['bbox']),
