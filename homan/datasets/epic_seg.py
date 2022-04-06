@@ -5,15 +5,8 @@ from glob import glob
 import json
 
 import numpy as np
-from PIL import Image, ImageColor
+from PIL import ImageColor
 import cv2
-
-
-def read_epic_image(video_id, frame_idx, root='/home/skynet/Zhifan/data/epic_rgb_frames/'):
-    root = Path(root)
-    frame = root/video_id[:3]/video_id/f"frame_{frame_idx:010d}.jpg"
-    frame = Image.open(frame)
-    return np.asarray(frame)
 
 
 class EpicSegGT(object):
