@@ -193,6 +193,8 @@ class Epic:
         self.track_padding = track_padding
         self.min_frame_nb = min_frame_nb
         self.epic_root = epic_root
+        self.valid_vids_path = valid_vids_path
+        self.image_size = (640, 360)
 
         self.object_models = load_models(MODELS)
         if hdf5_root is not None:
@@ -209,15 +211,14 @@ class Epic:
                 img_path = self.frame_template.format(
                         video_id[:3], video_id, frame_idx)
                 img = cv2.imread(img_path)
-                img = cv2.resize(img,
-                                self.image_size)
+                img = cv2.resize(img, self.image_size)
                 img = Image.fromarray(img[:, :, ::-1])
                 return img
         self._read_frame = _read_frame
 
         self.resize_factor = 3
         self.frame_nb = frame_nb
-        self.image_size = (640, 360)
+        self.frame_step = frame_step
         cache_folder = osp.join("data", "cache")
         os.makedirs(cache_folder, exist_ok=True)
 
@@ -227,43 +228,25 @@ class Epic:
                                           side="right").th_faces.numpy()
         self.faces = {"left": left_faces, "right": right_faces}
 
-        cache_path = 'data/cache/epic_take_putopen_close_can_cup_phone_plate_pitcher_jug_bottle_20.pkl'
-        if os.path.exists(cache_path) and use_cache:
-            with open(cache_path, "rb") as p_f:
+        self.cache_path = self._get_cache_path()
+        if os.path.exists(self.cache_path) and use_cache:
+            with open(self.cache_path, "rb") as p_f:
                 dataset_annots = pickle.load(p_f)
             vid_index = dataset_annots["vid_index"]
             annotations = dataset_annots["annotations"]
         else:
-            with open(osp.join(self.epic_root, "EPIC_100_train.pkl"), "rb") as p_f:
-                annot_df = pickle.load(p_f)
-            valid_vids = pd.read_excel(valid_vids_path)
-
-            # 1. Select video with gt segs
-            annot_df = annot_df[annot_df.video_id.isin(valid_vids['Unnamed: 0'])]
-            # 2. Select interested sub-sequence
-            annot_df = annot_df[annot_df.noun.isin(self.nouns)]
-
-            print(f"Processing {annot_df.shape[0]} clips for nouns {self.nouns}")
-            vid_index, annotations = self.compute_tracks(annot_df)
-
-            vid_index = pd.DataFrame(vid_index)
+            vid_index, annotations = self._init_tracks()
             dataset_annots = {
                 "vid_index": vid_index,
                 "annotations": annotations,
             }
-            with open(cache_path, "wb") as p_f:
+            with open(self.cache_path, "wb") as p_f:
                 pickle.dump(dataset_annots, p_f)
 
         self.annotations = annotations
-        self.tareader = tarutils.TarReader()
         self.vid_index = vid_index
-        self.chunk_index = chunk_vid_index(self.vid_index,
-                                           chunk_size=frame_nb,
-                                           chunk_step=frame_step,
-                                           chunk_spacing=frame_step * frame_nb)
-        self.chunk_index = self.chunk_index[self.chunk_index.object.isin(
-            self.nouns)]
-        print(f"Working with {len(self.chunk_index)} chunks for {self.nouns}")
+
+        self.chunk_index = self._init_chunk_vid_index(vid_index)
 
         # Get paired links as neighboured joints
         self.links = [
@@ -273,6 +256,35 @@ class Epic:
             (0, 13, 14, 15, 16),
             (0, 17, 18, 19, 20),
         ]
+
+    def _get_cache_path(self):
+        return 'data/cache/epic_take_putopen_close_can_cup_phone_plate_pitcher_jug_bottle_20.pkl'
+
+    def _init_tracks(self):
+        with open(osp.join(self.epic_root, "EPIC_100_train.pkl"), "rb") as p_f:
+            annot_df = pickle.load(p_f)
+        valid_vids = pd.read_excel(self.valid_vids_path)
+
+        # 1. Select video with gt segs
+        annot_df = annot_df[annot_df.video_id.isin(valid_vids['Unnamed: 0'])]
+        # 2. Select interested sub-sequence
+        annot_df = annot_df[annot_df.noun.isin(self.nouns)]
+
+        print(f"Processing {annot_df.shape[0]} clips for nouns {self.nouns}")
+        vid_index, annotations = self.compute_tracks(annot_df)
+
+        vid_index = pd.DataFrame(vid_index)
+        return vid_index, annotations
+    
+    def _init_chunk_vid_index(self, vid_index):
+        chunk_index = chunk_vid_index(vid_index,
+                                      chunk_size=self.frame_nb,
+                                      chunk_step=self.frame_step,
+                                      chunk_spacing=self.frame_step * self.frame_nb)
+        chunk_index = chunk_index[chunk_index.object.isin(
+            self.nouns)]
+        print(f"Working with {len(chunk_index)} chunks for {self.nouns}")
+        return chunk_index
     
     def compute_tracks(self, annot_df):
         vid_index = []
@@ -326,10 +338,11 @@ class Epic:
             #     print(f"Skipping idx {annot_idx}")
         return vid_index, annotations
         
-
     def get_roi(self, video_annots, frame_ids, res=640):
         """
         Get square ROI in xyxy format
+
+        roi_expansion was 0.2
         """
         # Get all 2d points and extract bounding box with given image
         # ratio
@@ -545,3 +558,190 @@ class Epic:
         hom_2d = np.array(cam_intr).dot(points3d.transpose()).transpose()
         points2d = (hom_2d / hom_2d[:, 2:])[:, :2]
         return points2d.astype(np.float32)
+
+
+class EpicFrame(Epic):
+    
+    def __init__(
+        self,
+        frames_file,
+        interpolation_dir,
+        *args,
+        **kwargs):
+
+        self._frames_file = frames_file
+        self._interpolation_dir = interpolation_dir
+
+        self.with_interp_mask = True
+        if self._interpolation_dir is None:
+            self.with_interp_mask = False
+            
+        super(EpicFrame, self).__init__(*args, **kwargs)
+
+    def _get_cache_path(self):
+        return 'data/cache/epic_frame.pkl'
+    
+    def _init_tracks(self):
+        with open(self._frames_file) as fp:
+            lines = fp.readlines()
+
+        vid_index = []
+        for i, line in enumerate(lines):
+            line = line.strip().replace('\t', ' ')
+            nid, cat, side, st_frame = line.split(' ')
+            vid = '_'.join(nid.split('_')[:2])
+            st_frame = int(st_frame)
+            side = '_'.join([side, 'hand'])
+            vid_index.append([
+                (vid, i, nid), 1, st_frame, cat, 'none', side])
+        vid_index = pd.DataFrame(
+            vid_index, columns=['seq_idx', 'frame_nb', 
+                                'start_frame', 'object', 'verb', 'side'])
+        
+        def _df2boxes(df):
+            boxes = np.asarray([
+                epichoa.row2box(row) for _, row in df.iterrows()
+            ])
+            return boxes
+
+        _hoa_dets_cache = dict()
+        annotataions = dict()
+
+        for _, vid_info in vid_index.iterrows():
+            seq_idx = vid_info.seq_idx
+            annotation = dict()
+            annotation['frame_idxs'] = [vid_info.start_frame]
+            vid, _, nid = seq_idx
+            if vid not in _hoa_dets_cache:
+                hoa_dets = epichoa.load_video_hoa(
+                    vid,
+                    hoa_root=osp.join(self.epic_root, "hoa"))
+                hoa_dets = hoa_dets[
+                    hoa_dets.left < hoa_dets.right][
+                        hoa_dets.top < hoa_dets.bottom]
+                _hoa_dets_cache[vid] = hoa_dets
+            else:
+                hoa_dets = _hoa_dets_cache[vid]
+
+            hoa_dets = hoa_dets[hoa_dets.frame == vid_info.start_frame]
+            obj_df = hoa_dets[hoa_dets.det_type == 'object']
+            if vid_info.side == 'left_hand':
+                hand_df = hoa_dets.loc[(hoa_dets.det_type == 'hand') & (hoa_dets.side == 'left')]
+            else:
+                hand_df = hoa_dets.loc[(hoa_dets.det_type == 'hand') & (hoa_dets.side == 'right')]
+            objects = _df2boxes(obj_df)
+            hand = _df2boxes(hand_df)
+            annotataions[seq_idx] = dict(
+                bboxes_xyxy={
+                    'objects': objects,
+                    vid_info.side: hand,
+                },
+                frame_idxs=[vid_info.start_frame]
+            )
+        
+        return vid_index, annotataions
+            
+    def _init_chunk_vid_index(self, vid_index):
+        new_vid_index = vid_index.copy()
+        new_vid_index['frame_idxs'] = [[0]] * len(vid_index)
+        return new_vid_index
+
+    def get_roi(self, video_annots, frame_ids, res=640, roi_expansion=1):
+        """
+        Get square ROI in xyxy format
+
+        roi_expansion was 0.2
+        """
+        # Get all 2d points and extract bounding box with given image
+        # ratio
+        annots = self.annotations[video_annots.seq_idx]
+        bboxes = [bboxs[frame_ids] for bboxs in annots["bboxes_xyxy"].values()]
+        all_vid_points = np.concatenate(list(bboxes)) / self.resize_factor
+        xy_points = np.concatenate(
+            [all_vid_points[:, :2], all_vid_points[:, 2:]], 0)
+        mins = xy_points.min(0)
+        maxs = xy_points.max(0)
+        roi_box_raw = np.array([mins[0], mins[1], maxs[0], maxs[1]])
+        roi_bbox = bboxutils.bbox_wh_to_xy(
+            bboxutils.make_bbox_square(bboxutils.bbox_xy_to_wh(roi_box_raw),
+                                       bbox_expansion=roi_expansion))
+        roi_center = (roi_bbox[:2] + roi_bbox[2:]) / 2
+        # Assumes square bbox
+        roi_scale = roi_bbox[2] - roi_bbox[0]
+        affine_trans = handutils.get_affine_transform(roi_center, roi_scale,
+                                                      [res, res])[0]
+        return roi_bbox, affine_trans
+    
+    def get_interpolation_mask(self, vid, fid):
+        path = f'{self._interpolation_dir}/{vid}/frame_{fid:010d}.png'
+        mask = Image.open(path).convert('P')
+        mask.resize(self.image_size, Image.NEAREST)
+        return mask
+    
+    def __getitem__(self, idx):
+        return self.get_frame_info(idx)
+    
+    def get_frame_info(self, idx, res=640):
+        vid_info = self.vid_index.iloc[idx]
+        # Use all frames if frame_nb is -1
+        if self.frame_nb == -1:
+            frame_nb = vid_info.frame_nb
+        else:
+            frame_nb = self.frame_nb
+
+        frame_ids = np.linspace(0, vid_info.frame_nb - 1,
+                                frame_nb).astype(np.int)
+
+        seq_frame_idxs = [self.annotations[vid_info.seq_idx]["frame_idxs"]][0]
+        frame_idxs = [seq_frame_idxs[frame_id] for frame_id in frame_ids]
+        video_id = vid_info.seq_idx[0]
+
+        # Read images from tar file
+        images = []
+        masks = []
+        seq_obj_info = []
+        seq_hand_infos = []
+        seq_cameras = []
+        roi, affine_trans = self.get_roi(vid_info, frame_ids)
+        for frame_id in frame_ids:
+            frame_idx = seq_frame_idxs[frame_id]
+
+            img = self._read_frame(video_id, frame_idx)
+            img = handutils.transform_img(img, affine_trans, [res, res])
+            images.append(img)
+
+            if self.with_interp_mask:
+                mask = self.get_interpolation_mask(video_id, frame_idx)
+                mask = handutils.transform_img(mask, affine_trans, [res, res])
+                mask = np.asarray(mask)
+                masks.append(mask)
+            else:
+                masks.append(None)
+
+            obj_info, hand_infos, camera, setup = self.get_hand_obj_info(
+                vid_info,
+                frame_id,
+                roi=roi,
+                res=res,
+                affine_trans=affine_trans)
+            seq_obj_info.append(obj_info)
+            seq_hand_infos.append(hand_infos)
+            seq_cameras.append(camera)
+        hand_nb = len(seq_hand_infos[0])
+        collated_hand_infos = []
+        for hand_idx in range(hand_nb):
+            collated_hand_info = collate.collate(
+                [hand[hand_idx] for hand in seq_hand_infos])
+            collated_hand_info['label'] = collated_hand_info['label'][0]
+            collated_hand_infos.append(collated_hand_info)
+
+        obs = dict(hands=collated_hand_infos,
+                   objects=[collate.collate(seq_obj_info)],
+                   camera=collate.collate(seq_cameras),
+                   setup=setup,
+                   frame_idxs=frame_idxs,
+                   images=images,
+                   masks=masks,
+                   seq_idx=vid_info.seq_idx)
+
+        return obs

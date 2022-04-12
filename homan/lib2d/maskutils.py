@@ -17,10 +17,10 @@ def add_occlusions(masks, occluder_mask, mask_bboxes):
     """
     Args:
         masks (list[np.ndarray]): list of object masks in [REND_SIZE, REND_SIZE] [(REND_SIZE, REND_SIZE), ...]
-        mask_bboxes (list[np.ndarray]): matching list of square xy_wh bboxes [(4,), ...]
         occluder_mask (torch.Tensor): [B, IMAGE_SIZE, IMAGE_SIZE] occluder where B
             dim aggregates different one-hot encodings of occluder
             masks
+        mask_bboxes (list[np.ndarray]): matching list of square xy_wh bboxes [(4,), ...]
     
     Returns:
         masks: list of (REND_SIZE, REND_SIZE) with

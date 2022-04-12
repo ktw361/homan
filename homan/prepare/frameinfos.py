@@ -11,20 +11,29 @@ from homan.mocap import process_handmocap_predictions
 from homan.prepare.gtmasks import render_gt_masks
 from homan.utils.bbox import bbox_wh_to_xy, bbox_xy_to_wh
 from homan.viz.vizframeinfo import viz_frame_info
+from homan.datasets.interpolated_mask_extractor import InterpolatedMaskExtractor
 
 import os
 from libyana.verify import checkshape
 
 
 def process_hand_boxes(image, hand_boxes, hand_preds, mask_extractor,
-                       image_size):
+                       image_size, side=None):
     if isinstance(hand_boxes, list):
         hand_boxes = np.stack(hand_boxes)
-    hand_annots = mask_extractor.masks_from_bboxes(image,
-                                                   hand_boxes,
-                                                   class_idx=0,
-                                                   pred_classes=None,
-                                                   image_size=image_size)
+    if side is None:
+        hand_annots = mask_extractor.masks_from_bboxes(image,
+                                                       hand_boxes,
+                                                       class_idx=0,
+                                                       pred_classes=None,
+                                                       image_size=image_size)
+    else:
+        # InterpolatedMastExtractor
+        masked_im = image
+        class_idx = 1 if side == 'left' else 2
+        hand_annots = mask_extractor.masks_from_bboxes(
+            masked_im, hand_boxes, class_idx=class_idx, 
+            pred_classes=None, image_size=image_size)
     full_masks = np.stack([annot["full_mask"] for annot in hand_annots])
     hand_parameters = process_handmocap_predictions(
         mocap_predictions=hand_preds,
@@ -35,6 +44,7 @@ def process_hand_boxes(image, hand_boxes, hand_preds, mask_extractor,
 
 
 def get_frame_infos(images_np,
+                    masks_np=None,
                     hand_predictor=None,
                     mask_extractor=None,
                     sample_folder=None,
@@ -47,6 +57,8 @@ def get_frame_infos(images_np,
     """
     Arguments:
         images_np (list[np.ndarray]): List of input images
+        masks_np (list[np.ndarray]):
+            Interpolated Epic Mask
         hand_bboxes (dict): dictionnary containing {left_hand: [None|frame_nb x 4], right_hand: [None|frame_nb x 4]}
             sequence bounding boxes in xywh format
         obj_bboxes (np.ndarray): (1, frame_nb, 4) xywh object bounding boxes
@@ -81,6 +93,7 @@ def get_frame_infos(images_np,
             }
             _person_parameters, _obj_mask_infos, _image = get_frame_info(
                 image,
+                masks_np[image_idx],
                 hand_predictor,
                 mask_extractor,
                 sample_folder=sample_folder,
@@ -109,6 +122,7 @@ def get_frame_infos(images_np,
 
 
 def get_person_params(image,
+                      mask_np=None,
                       hand_predictor=None,
                       mask_extractor=None,
                       sample_folder=None,
@@ -126,6 +140,7 @@ def get_person_params(image,
         mask_extractor: Instance segmentor
     Returns:
         frame_infos (dict): Contains person parameters and mask information
+            - mask: (1, 640, 640)
     """
     person_parameters = {}
     left_boxes = [
@@ -144,13 +159,16 @@ def get_person_params(image,
         left_preds = [pred['left_hand'] for pred in mocap_predictions]
     else:
         left_preds = None
+
+    mask_input = mask_np if isinstance(mask_extractor, InterpolatedMaskExtractor) else image
     all_parameters = []
     if len(left_boxes) > 0:
-        left_parameters = process_hand_boxes(image,
+        left_parameters = process_hand_boxes(mask_input,
                                              hand_boxes=left_boxes,
                                              hand_preds=left_preds,
                                              mask_extractor=mask_extractor,
-                                             image_size=image_size)
+                                             image_size=image_size,
+                                             side='left')
         all_parameters.append(left_parameters)
     if hand_predictor is not None:
         right_preds = [pred['right_hand'] for pred in mocap_predictions]
@@ -163,11 +181,12 @@ def get_person_params(image,
     ]
     if len(right_boxes) > 0:
         right_boxes = np.stack(right_boxes)
-        right_parameters = process_hand_boxes(image,
+        right_parameters = process_hand_boxes(mask_input,
                                               hand_boxes=right_boxes,
                                               hand_preds=right_preds,
                                               mask_extractor=mask_extractor,
-                                              image_size=image_size)
+                                              image_size=image_size,
+                                              side='right')
         all_parameters.append(right_parameters)
 
     for key in all_parameters[0].keys():
@@ -182,6 +201,7 @@ def get_person_params(image,
 
 
 def get_frame_info(image,
+                   mask_np=None,
                    hand_predictor=None,
                    mask_extractor=None,
                    sample_folder=None,
@@ -195,6 +215,7 @@ def get_frame_info(image,
 
     Arguments:
         image (np.ndarray): expanded hand-object image
+        mask_np (np.ndarray): Interpolated Epic Mask
         hand_bboxes (list): [{'left_hand': np.array(4,), 'right_hand': np.array(4,)}, ...] in xywh format
         hand_predictor: Hand pose regressor
         mask_extractor: Instance segmentor
@@ -202,12 +223,13 @@ def get_frame_info(image,
         frame_infos (tuple): (person_parameters, obj_mask_infos, image)
     """
     person_parameters = get_person_params(
-        image, hand_predictor, mask_extractor,
+        image, mask_np, hand_predictor, mask_extractor,
         sample_folder, hand_bboxes, camintr, debug, image_size)
 
     # Handling only 1 object
+    mask_input = mask_np if isinstance(mask_extractor, InterpolatedMaskExtractor) else image
     obj_mask_infos = mask_extractor.masks_from_bboxes(
-        image,
+        mask_input,
         bbox_xy_to_wh(obj_bboxes),
         pred_classes=None,
         image_size=image_size)[0]
