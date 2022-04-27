@@ -44,7 +44,8 @@ def get_args():
     parser.add_argument("--epic_root", 
                         default="/home/skynet/Zhifan/datasets/epic")
     parser.add_argument('--frames_file',
-                        default="/home/skynet/Zhifan/data/epic_analysis/clean_frame_debug.txt")
+                        default=None)
+                        # default="/home/skynet/Zhifan/data/epic_analysis/clean_frame_debug.txt")
     # parser.add_argument("--epic_valid_path", 
     #                     default='/home/skynet/Zhifan/data/allVideos.xlsx')
     parser.add_argument('--interpolation_dir',
@@ -62,7 +63,7 @@ def get_args():
                         default=10,
                         type=int,
                         help="Number of video frames to process in a batch, aka chunk_size")
-    parser.add_argument("--data_step", default=100, type=int)
+    parser.add_argument("--data_step", default=1, type=int)
     parser.add_argument("--data_offset", default=0, type=int)
     parser.add_argument("--seq_idx", type=str,
                         help="manually select one video")
@@ -429,6 +430,7 @@ class Fitter(object):
         person_parameters, obj_mask_infos, super2d_imgs = get_frame_infos(
             images_np,
             annots['masks'],
+            annots['category'],
             self.hand_predictor,
             self.mask_extractor,
             sample_folder=self.sample_folder,
@@ -696,7 +698,13 @@ def main(args):
         logging.info(f"processing {sample_idx}/{len(dataset)}")
         # Prepare sample folder
         seq_idx = dataset.chunk_index.iloc[sample_idx]['seq_idx']
-        annots = dataset[sample_idx]
+        try:
+            annots = dataset[sample_idx]
+        except IndexError:
+            logging.error(f"IndexError occurs at {video_id} {start_frame}.")
+            import pudb
+            pudb.set_trace()
+            continue
         if dataset.name == 'epic':
             video_id = seq_idx[0]  # seq_idx = (video_id, _, _)
             start_frame = annots['frame_idxs'][0]

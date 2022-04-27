@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-from homan.datasets import collate, epichoa, tarutils, epic_hdf5
+from homan.datasets import collate, epichoa, epic_hdf5
 from homan.datasets.chunkvids import chunk_vid_index
 from homan.tracking import trackhoa as trackhoadf
 from homan.utils import bbox as bboxutils
@@ -24,6 +24,9 @@ from libyana.transformutils import handutils
 from manopth import manolayer
 
 SHAPENET_PATH = "http://shapenet.cs.stanford.edu/shapenet/obj-zip/ShapeNetCore.v2/"
+"""
+Shapenet list: https://gist.github.com/tejaskhot/15ae62827d6e43b91a4b0c5c850c168e
+"""
 
 MODELS = {
     "bottle": {
@@ -33,9 +36,9 @@ MODELS = {
         "scale": 0.2,
     },
     # "jug": {
-    #     "path":
-    #     # "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
-    #     '/media/eve/DATA/Zhifan/YCB_Video_Models/models/019_pitcher_base/textured_simple.obj',
+    #     "path": "data/cache/models/jug.obj",
+        # "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+        # '/media/eve/DATA/Zhifan/YCB_Video_Models/models/019_pitcher_base/textured_simple.obj',
     #     "scale": 0.25,
     # },
     # "pitcher": {
@@ -67,7 +70,16 @@ MODELS = {
         # "path": SHAPENET_PATH+
         # "02946921/3fd8dae962fa3cc726df885e47f82f16/models/model_normalized_proc.obj",
         "scale": 0.2
+    },
+    "mug": {
+        "path": "data/cache/models/can.obj",
+        "scale": 0.12,
+    },
+    "bowl": {
+        "path": "data/cache/models/bowl.obj",
+        "scale": 0.12,
     }
+
 }
 
 
@@ -588,7 +600,7 @@ class EpicFrame(Epic):
         vid_index = []
         for i, line in enumerate(lines):
             line = line.strip().replace('\t', ' ')
-            nid, cat, side, st_frame = line.split(' ')
+            nid, cat, side, st_frame = [v for v in line.split(' ') if len(v) > 0]
             vid = '_'.join(nid.split('_')[:2])
             st_frame = int(st_frame)
             side = '_'.join([side, 'hand'])
@@ -675,7 +687,7 @@ class EpicFrame(Epic):
     def get_interpolation_mask(self, vid, fid):
         path = f'{self._interpolation_dir}/{vid}/frame_{fid:010d}.png'
         mask = Image.open(path).convert('P')
-        mask.resize(self.image_size, Image.NEAREST)
+        mask = mask.resize(self.image_size, Image.NEAREST)
         return mask
     
     def __getitem__(self, idx):
@@ -742,6 +754,7 @@ class EpicFrame(Epic):
                    frame_idxs=frame_idxs,
                    images=images,
                    masks=masks,
-                   seq_idx=vid_info.seq_idx)
+                   seq_idx=vid_info.seq_idx,
+                   category=vid_info.object)
 
         return obs

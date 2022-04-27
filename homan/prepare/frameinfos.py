@@ -11,6 +11,7 @@ from homan.mocap import process_handmocap_predictions
 from homan.prepare.gtmasks import render_gt_masks
 from homan.utils.bbox import bbox_wh_to_xy, bbox_xy_to_wh
 from homan.viz.vizframeinfo import viz_frame_info
+from homan.datasets.epic_seg_classes import epic_cats
 from homan.datasets.interpolated_mask_extractor import InterpolatedMaskExtractor
 
 import os
@@ -45,6 +46,7 @@ def process_hand_boxes(image, hand_boxes, hand_preds, mask_extractor,
 
 def get_frame_infos(images_np,
                     masks_np=None,
+                    obj_cat=None,
                     hand_predictor=None,
                     mask_extractor=None,
                     sample_folder=None,
@@ -59,6 +61,7 @@ def get_frame_infos(images_np,
         images_np (list[np.ndarray]): List of input images
         masks_np (list[np.ndarray]):
             Interpolated Epic Mask
+        obj_cat (str): Object category name. See epic_seg.py: EpicSegGT
         hand_bboxes (dict): dictionnary containing {left_hand: [None|frame_nb x 4], right_hand: [None|frame_nb x 4]}
             sequence bounding boxes in xywh format
         obj_bboxes (np.ndarray): (1, frame_nb, 4) xywh object bounding boxes
@@ -94,6 +97,7 @@ def get_frame_infos(images_np,
             _person_parameters, _obj_mask_infos, _image = get_frame_info(
                 image,
                 masks_np[image_idx],
+                obj_cat,
                 hand_predictor,
                 mask_extractor,
                 sample_folder=sample_folder,
@@ -202,6 +206,7 @@ def get_person_params(image,
 
 def get_frame_info(image,
                    mask_np=None,
+                   obj_cat=None,
                    hand_predictor=None,
                    mask_extractor=None,
                    sample_folder=None,
@@ -227,10 +232,16 @@ def get_frame_info(image,
         sample_folder, hand_bboxes, camintr, debug, image_size)
 
     # Handling only 1 object
-    mask_input = mask_np if isinstance(mask_extractor, InterpolatedMaskExtractor) else image
+    if isinstance(mask_extractor, InterpolatedMaskExtractor):
+        mask_input = mask_np
+        class_idx = epic_cats.index(obj_cat)
+    else:
+        mask_input = image
+        class_idx = -1
     obj_mask_infos = mask_extractor.masks_from_bboxes(
         mask_input,
         bbox_xy_to_wh(obj_bboxes),
+        class_idx=class_idx,
         pred_classes=None,
         image_size=image_size)[0]
 
