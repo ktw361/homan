@@ -375,7 +375,8 @@ class Fitter(object):
                     - 'cams':		torch.Size([1, 3])
                     - 'faces':		torch.Size([1, 1538, 3])
                     - 'local_cams':		torch.Size([1, 3])
-                    - 'verts':		torch.Size([1, 778, 3])
+                    - 'verts':		torch.Size([1, 778, 3]) 
+                        Computed output from FrankMocap using mano pose
                     - 'verts2d':		torch.Size([1, 778, 2])
                     - 'rotations':		torch.Size([1, 3, 3])
                     - 'mano_pose':		torch.Size([1, 45])

@@ -577,7 +577,7 @@ class EpicFrame(Epic):
     def __init__(
         self,
         frames_file,
-        interpolation_dir,
+        interpolation_dir='/home/skynet/Zhifan/data/epic_analysis/interpolation',
         *args,
         **kwargs):
 
