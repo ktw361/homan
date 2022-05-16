@@ -40,11 +40,15 @@ def optimize_hand_object(
     fps=24,
     viz_len=7,
     image_size=640,
+    image_paint_style='vertical',
+    paint_with_image=False,
 ):
     """
     Arguments:
         fps (int): frames per second for video visualization
         viz_len (int): number of frames to show
+        image_paint_style (str): one of {'horizontal', 'vertical'},
+            how the `frontal` and `top_down` image are put together.
     """
     os.makedirs(viz_folder, exist_ok=True)
 
@@ -171,10 +175,14 @@ def optimize_hand_object(
             front_top_path = os.path.join(viz_folder, file_name)
             frontal = np.concatenate([img for img in frontal], 1)
             top_down = np.concatenate([img for img in top_down], 1)
-            front_top = np.concatenate(
-                [frontal, top_down[:frontal.shape[0], :frontal.shape[1]]], 0)
-            front_top = cv2.resize(
-                front_top, (front_top.shape[1] // 2, front_top.shape[0] // 2))
+            concat_axis = 0 if image_paint_style == 'vertical' else 1
+            painting = [frontal, top_down[:frontal.shape[0], :frontal.shape[1]]]
+            if paint_with_image:
+                painting = images + painting
+            front_top = np.concatenate(painting, concat_axis)
+            if image_paint_style == 'horizontal':
+                front_top = cv2.resize(
+                    front_top, (front_top.shape[1] // 2, front_top.shape[0] // 2))
             Image.fromarray(front_top).save(front_top_path)
             imgs[step] = front_top_path
             optim_imgs.append(front_top)

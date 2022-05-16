@@ -1,3 +1,8 @@
+"""
+This script extract images and 3d vertices from 
+EpicFrame class and results/ respectively.
+"""
+
 # -*- coding: utf-8 -*-
 
 # pylint: disable=C0411,broad-except,too-many-statements,too-many-branches,logging-fstring-interpolation,import-error
@@ -5,12 +10,18 @@ import argparse
 from collections import defaultdict
 import logging
 import os
+import os.path as osp
 import pickle
-from PIL import Image
+import json
 
 import cv2
 import numpy as np
 import torch
+from PIL import Image
+
+from manopth import manolayer
+from homan.utils.geometry import rot6d_to_matrix
+from homan.utils.camera import compute_transformation_persp
 
 from libyana.exputils import argutils
 from libyana.randomutils import setseeds
@@ -44,12 +55,12 @@ def get_args():
     parser.add_argument("--epic_root", 
                         default="/home/skynet/Zhifan/datasets/epic")
     parser.add_argument('--frames_file',
-                        default=None)
+                        default='/home/skynet/Zhifan/data/epic_analysis/clean_frame_debug.txt')
                         # default="/home/skynet/Zhifan/data/epic_analysis/clean_frame_debug.txt")
     # parser.add_argument("--epic_valid_path", 
     #                     default='/home/skynet/Zhifan/data/allVideos.xlsx')
     parser.add_argument('--interpolation_dir',
-                        default=None)
+                        default='/home/skynet/Zhifan/data/epic_analysis/interpolation')
                         # default='/home/skynet/Zhifan/data/epic_analysis/interpolation/')
     parser.add_argument("--dataset_mode",
                         default="chunk",
@@ -76,7 +87,7 @@ def get_args():
     parser.add_argument("--num_joint_iterations", default=201, type=int)
     parser.add_argument("--num_initializations", default=500, type=int)
     parser.add_argument("--mesh_path", type=str, help="Index of mesh ")
-    parser.add_argument("--result_root", default="results/tmp")
+    parser.add_argument("--result_root", default="results/epic_frame_gt/step1")
     parser.add_argument(
         "--resume",
         help="Path to root folder of previously computed optimization results")
@@ -101,7 +112,7 @@ def get_args():
     parser.add_argument(
         "--lw_smooth",
         type=float,
-        default=0,  # has to be 0 because no other frames
+        default=2000,
         help="Loss weight for smoothness.",
     )
     parser.add_argument(
@@ -181,6 +192,60 @@ def get_args():
     return args
 
 
+class ManoForwarder:
+    
+    def __init__(self, 
+                 mano_root='/home/skynet/Zhifan/data/mano_v1_2/models/'):
+        self.pca_comps = 16
+        self.model_pca = manolayer.ManoLayer(
+            center_idx=None,
+            flat_hand_mean=False,
+            ncomps=self.pca_comps,
+            mano_root=mano_root,
+            use_pca=True,
+            root_rot_mode='axisang',
+            joint_rot_mode='axisang'
+        )
+        self.model_flat = manolayer.ManoLayer(
+            center_idx=None,
+            flat_hand_mean=True,
+            ncomps=self.pca_comps,
+            mano_root=mano_root,
+            use_pca=False,
+            root_rot_mode='axisang',
+            joint_rot_mode='axisang'
+        )
+
+    def forward_pca(self,
+                    mano_pca_pose,
+                    mano_rot,
+                    mano_betas,
+                    mano_trans):
+        """
+        Fields from person_parameters:
+        mano_trans, mano_rot, mano_betas, mano_pca_pose
+        """
+        pca_pose = mano_pca_pose
+        rot = mano_rot
+        betas = mano_betas
+        transl = mano_trans
+
+        op1 = pca_pose[:, :self.pca_comps]
+        op2 = self.model_pca.th_selected_comps.unsqueeze(0).repeat(1, 1, 1)
+
+        hand_pose = torch.einsum('bi,bij->bj',
+                                [op1, op2])
+        hand_pose = hand_pose + self.model_pca.th_hands_mean
+
+        global_orient = rot
+        # transl = hand_trans = torch.zeros([1, 3])
+        pose_coeff = torch.cat([global_orient, hand_pose], 1)
+
+        v, _, _ = self.model_flat.forward(pose_coeff, betas, transl)
+        v /= 1000
+        return v
+
+
 class Fitter(object):
     def __init__(self,
                  image_size,
@@ -220,114 +285,117 @@ class Fitter(object):
                 
         self.hand_predictor = HandMocap(hand_checkpoint, smpl_path)
 
+        self.mano_forwarder = ManoForwarder()
+
     def _set_paths(self, sample_folder, result_root):
         self.sample_folder = sample_folder
         os.makedirs(sample_folder, exist_ok=True)
         self.save_path = os.path.join(result_root, "results.pkl")
         self.sample_path = os.path.join(sample_folder, "results.pkl")
         self.check_path = os.path.join(sample_folder, "joint_fit.pt")
-    
+
     def fit_single_annot(self, annots, args, resume_folder):
         images_np, camintr, obj_bboxes, hand_bboxes, \
             gt_obj_verts, gt_hand_verts = self.preprocess_detections(annots)
-        print("Regressing hands")
-
-        camintr_nc = camintr.copy()
-        camintr_nc[:, :2] = camintr_nc[:, :2] / self.image_size
-
-        indep_fit_res, state_dict = self.get_indep_fit(
-            resume_folder, images_np, camintr, obj_bboxes,
-            hand_bboxes, annots)
-
-        # Extract weight dictionary from arguments
-        loss_weights = {
-            key: val
-            for key, val in vars(args).items() if "lw_" in key
-        }
-
-        # Run JOINT OPTIMIZATION
-        # mano and object poses are initialized using indep_fit_res
-        model, loss_evolution, imgs = optimize_hand_object(
-            person_parameters=indep_fit_res["person_parameters"],
-            object_parameters=indep_fit_res["object_parameters"],
-            hand_proj_mode=args.hand_proj_mode,
-            objvertices=indep_fit_res["obj_verts_can"],
-            objfaces=indep_fit_res["obj_faces"],
-            optimize_mano=args.optimize_mano,
-            optimize_mano_beta=args.optimize_mano_beta,
-            optimize_object_scale=args.optimize_object_scale,
-            loss_weights=loss_weights,
-            image_size=self.image_size,
-            num_iterations=args.num_joint_iterations,
-            images=images_np,
-            camintr=camintr_nc,
-            state_dict=state_dict,
-            viz_step=args.viz_step,
-            viz_folder=os.path.join(self.sample_folder, "jointoptim"),
-            image_paint_style='horizontal',
-            paint_with_image=False,
+        
+        # Step1: save hand_crop
+        Image.fromarray(images_np[0]).save(
+            osp.join(self.sample_folder, 'hand_crop.png')
         )
-        save_dict = {
-            "state_dict": {
-                key: val.contiguous().cpu()
-                for key, val in model.state_dict().items()
-                if ("mano_model" not in key)
-            }
-        }
-        torch.save(save_dict, os.path.join(
-            self.sample_folder, "joint_fit.pt"))
 
-        init_obj_verts = model.verts_object_init
-        init_hand_verts = model.verts_hand_init
-        fit_obj_verts, _ = model.get_verts_object()
-        fit_hand_verts, _ = model.get_verts_hand()
+        # Step2: extract 
 
-        def save_webgl():
-            import json
-            from neural_renderer import projection
-            K = model.camintr
-            R = torch.zeros_like(K)
-            t = torch.zeros([1, 3], device=K.device)
-            dist_coeffs = torch.zeros([1, 5], device=K.device)
-            orig_size = 1
+        sd = torch.load(osp.join(self.sample_folder, 'joint_fit.pt'))
+        mano_pca_pose = sd['state_dict']['mano_pca_pose']
+        mano_rot = sd['state_dict']['mano_rot']
+        mano_betas = sd['state_dict']['mano_betas']
+        mano_trans = sd['state_dict']['mano_trans']
 
-            hand_v = fit_hand_verts
-            obj_v = fit_obj_verts
-            with torch.no_grad():
-                hand_v_proj = projection(hand_v, K, R, t, dist_coeffs, orig_size)
-                obj_v_proj = projection(obj_v, K, R, t, dist_coeffs, orig_size)
-            hand_v = hand_v.detach().squeeze().cpu().numpy().tolist()
-            obj_v = obj_v.detach().squeeze().cpu().numpy().tolist()
-            hand_v_proj = hand_v_proj.detach().squeeze().cpu().numpy().tolist()
-            obj_v_proj = obj_v_proj.detach().squeeze().cpu().numpy().tolist()
+        translations = sd['state_dict']['translations_hand']
+        rotations = sd['state_dict']['rotations_hand']
 
-            K = K.detach().cpu().numpy() # .tolist()
-            fx = K[0, 0, 0]
-            fov = 2 * np.arctan2(640, 2*fx).item()
-            cx = K[0, 0, -1].item()
-            cy = K[0, 1, -1].item()
-            webgl_data = dict(
-                hand_v=hand_v, obj_v=obj_v, 
-                hand_v_proj=hand_v_proj, obj_v_proj=obj_v_proj,
-                hand_faces=model.faces_hand.detach().squeeze().cpu().numpy().tolist(),
-                obj_faces=model.faces_object.detach().squeeze().cpu().numpy().tolist(),
-                fov=fov,
-                cx=cx, cy=cy,
-                )
-            with open(os.path.join(self.sample_folder, 'webgl_data.json'), 'w') as fp:
-                json.dump(webgl_data, fp)
-        save_webgl()
+        # fields = ['pca_pose','rot','betas','trans']
+        v = self.mano_forwarder.forward_pca(
+            mano_pca_pose, mano_rot, mano_betas, mano_trans)
+
+        ### transform persp
+        R = rot6d_to_matrix(rotations)
+        scale = sd['state_dict']['int_scales_hand']
+        v = compute_transformation_persp(
+            v, translations, R, scale)[0]
+        v = v.squeeze()
+        
+        fx = sd['state_dict']['camintr'][0, 0, 0]
+        fov = 2 * np.arctan2(640, 2*fx)
+        webgl_data = dict()
+        webgl_data['v'] = v.cpu().numpy().tolist()
+        webgl_data['fov'] = fov.item()
+        with open(osp.join(self.sample_folder, 'webgl_data.json'), 'w') as fp:
+            json.dump(webgl_data, fp)
+
+
+        # camintr_nc = camintr.copy()
+        # camintr_nc[:, :2] = camintr_nc[:, :2] / self.image_size
+
+        # indep_fit_res, state_dict = self.get_indep_fit(
+        #     resume_folder, images_np, camintr, obj_bboxes,
+        #     hand_bboxes, annots)
+
+        # # Extract weight dictionary from arguments
+        # loss_weights = {
+        #     key: val
+        #     for key, val in vars(args).items() if "lw_" in key
+        # }
+
+        # # Run JOINT OPTIMIZATION
+        # # mano and object poses are initialized using indep_fit_res
+        # model, loss_evolution, imgs = optimize_hand_object(
+        #     person_parameters=indep_fit_res["person_parameters"],
+        #     object_parameters=indep_fit_res["object_parameters"],
+        #     hand_proj_mode=args.hand_proj_mode,
+        #     objvertices=indep_fit_res["obj_verts_can"],
+        #     objfaces=indep_fit_res["obj_faces"],
+        #     optimize_mano=args.optimize_mano,
+        #     optimize_mano_beta=args.optimize_mano_beta,
+        #     optimize_object_scale=args.optimize_object_scale,
+        #     loss_weights=loss_weights,
+        #     image_size=self.image_size,
+        #     num_iterations=args.num_joint_iterations,
+        #     images=images_np,
+        #     camintr=camintr_nc,
+        #     state_dict=state_dict,
+        #     viz_step=args.viz_step,
+        #     viz_folder=os.path.join(self.sample_folder, "jointoptim"),
+        # )
+        # save_dict = {
+        #     "state_dict": {
+        #         key: val.contiguous().cpu()
+        #         for key, val in model.state_dict().items()
+        #         if ("mano_model" not in key)
+        #     }
+        # }
+        # torch.save(save_dict, os.path.join(
+        #     self.sample_folder, "joint_fit.pt"))
+        # # Save initial optimization results
+        # # with open(indep_fit_path, "wb") as p_f:
+        # #     pickle.dump(indep_fit_res, p_f)
+
+        # init_obj_verts = model.verts_object_init
+        # init_hand_verts = model.verts_hand_init
+        # fit_obj_verts, _ = model.get_verts_object()
+        # fit_hand_verts, _ = model.get_verts_hand()
 
         # gt_obj_verts = fit_obj_verts.new(gt_obj_verts)
         # gt_hand_verts = fit_hand_verts.new(gt_hand_verts)
-        self.visualize(model, images_np, gt_obj_verts=None, gt_hand_verts=None)
-        self.save_results(
-            args,
-            init_obj_verts, init_hand_verts,
-            fit_obj_verts, fit_hand_verts,
-            model.faces_object, model.faces_hand,
-            loss_evolution, imgs,
-            super2d_img_path=indep_fit_res["super2d_img_path"])
+        # self.visualize(model, images_np, gt_obj_verts, gt_hand_verts)
+        # self.save_results(
+        #     args,
+        #     init_obj_verts, init_hand_verts,
+        #     fit_obj_verts, fit_hand_verts,
+        #     gt_obj_verts, gt_hand_verts,
+        #     model.faces_object, model.faces_hand,
+        #     loss_evolution, imgs,
+        #     super2d_img_path=indep_fit_res["super2d_img_path"])
             
 
     def preprocess_detections(self, annots):
@@ -350,7 +418,22 @@ class Fitter(object):
             obj_bbox_padding
         ])
         gt_obj_verts = None
-        gt_hand_verts = None
+        if "objects" in setup:
+            gt_obj_verts = np.concatenate(
+                [annot["verts3d"] for annot in annots["objects"]], 1)
+        gt_hand_verts = []
+        if "right_hand" in setup:
+            gt_hand_verts.append(
+                np.concatenate([
+                    hand["verts3d"] for hand in annots["hands"]
+                    if hand["label"] == "right_hand"
+                ], 1))
+        if "left_hand" in setup:
+            gt_hand_verts.append(
+                np.concatenate([
+                    hand["verts3d"]
+                    for hand in annots["hands"] if hand["label"] == "left_hand"
+                ], 1))
 
         # Get hand detections and make them square
         hand_bboxes = {}
@@ -528,14 +611,9 @@ class Fitter(object):
     def visualize(self,
                   model,
                   images_np,
-                  gt_obj_verts=None,
-                  gt_hand_verts=None,
+                  gt_obj_verts,
+                  gt_hand_verts,
                   ):
-        # Save hand_crop
-        Image.fromarray(images_np[0]).save(
-            os.path.join(self.sample_folder, 'hand_crop.png')
-        )
-
         frame_nb = self.frame_nb
         image_size = self.image_size
         
@@ -546,23 +624,59 @@ class Fitter(object):
                                                       dist=4,
                                                       viz_len=frame_nb,
                                                       image_size=image_size)
+            frontal_gt_only, top_down_gt_only = visualize_hand_object(
+                model,
+                images_np,
+                dist=4,
+                viz_len=frame_nb,
+                image_size=image_size,
+                verts_hand_gt=gt_hand_verts,
+                verts_object_gt=gt_obj_verts,
+                gt_only=True)
 
+        with torch.no_grad():
+            # GT + pred overlay renders
+            frontal_gt, top_down_gt = visualize_hand_object(
+                model,
+                images_np,
+                dist=4,
+                verts_hand_gt=gt_hand_verts,
+                verts_object_gt=gt_obj_verts,
+                viz_len=frame_nb,
+                image_size=image_size,
+            )
+            # GT + init overlay renders
+            frontal_init_gt, top_down_init_gt = visualize_hand_object(
+                model,
+                images_np[:viz_len],
+                dist=4,
+                verts_hand_gt=gt_hand_verts,
+                verts_object_gt=gt_obj_verts,
+                viz_len=viz_len,
+                init=True,
+                image_size=image_size,
+            )
         # pred verts need to be brought back from square image space
         viz_path = os.path.join(self.sample_folder, "final_points.png")
         viz_gtpred_points(images=images_np[:viz_len],
                           pred_images={
                               "frontal_pred": frontal[:viz_len],
                               "topdown_pred": top_down[:viz_len],
+                              "frontal_pred+gt": frontal_gt[:viz_len],
+                              "topdown_pred+gt": top_down_gt[:viz_len],
+                              "frontal_init+gt": frontal_init_gt,
+                              "topdown_init+gt": top_down_init_gt
                           },
-                          save_path=viz_path,
-                          with_title=False,
-                          remove_gap=True,
-                          fig_res=6)
+                          save_path=viz_path)
         # Save predicted video clip
         top_down = cliputils.add_clip_text(top_down, "Pred")
+        top_down_gt = cliputils.add_clip_text(top_down_gt, "Pred + GT")
+        top_down_gt_only = cliputils.add_clip_text(top_down_gt_only,
+                                                   "Ground Truth")
 
         clip = np.concatenate([
-            np.concatenate([np.stack(images_np), frontal], 2),
+            np.concatenate([np.stack(images_np), frontal, frontal_gt_only], 2),
+            np.concatenate([top_down_gt, top_down, top_down_gt_only], 2)
         ], 1)
         evalviz.make_video_np(clip,
                               viz_path.replace(".png", ".webm"),
@@ -578,6 +692,8 @@ class Fitter(object):
                      init_hand_verts,
                      fit_obj_verts,
                      fit_hand_verts,
+                     gt_obj_verts,
+                     gt_hand_verts,
                      faces_object,
                      faces_hand,
                      loss_evolution,
@@ -586,6 +702,22 @@ class Fitter(object):
                      ):
 
         with torch.no_grad():
+            sample_obj_metrics = pointmetrics.get_point_metrics(
+                gt_obj_verts, fit_obj_verts)
+            sample_hand_metrics = pointmetrics.get_point_metrics(
+                gt_hand_verts.view(-1, 778, 3),
+                fit_hand_verts.view(-1, 778, 3))
+            init_obj_metrics = pointmetrics.get_point_metrics(
+                gt_obj_verts, init_obj_verts)
+            init_hand_metrics = pointmetrics.get_point_metrics(
+                gt_hand_verts.view(-1, 778, 3),
+                init_hand_verts.view(-1, 778, 3))
+            aligned_metrics = pointmetrics.get_align_metrics(
+                gt_hand_verts.view(-1, 778, 3),
+                fit_hand_verts.view(-1, 778, 3), gt_obj_verts, fit_obj_verts)
+            init_aligned_metrics = pointmetrics.get_align_metrics(
+                gt_hand_verts.view(-1, 778, 3),
+                fit_hand_verts.view(-1, 778, 3), gt_obj_verts, fit_obj_verts)
             inter_metrics = pointmetrics.get_inter_metrics(
                 fit_hand_verts, fit_obj_verts, faces_hand,
                 faces_object)
@@ -595,6 +727,22 @@ class Fitter(object):
 
         sample_metrics = {}
         # Metrics before joint optimization
+        for key, vals in init_obj_metrics.items():
+            sample_metrics[f"{key}_obj_init"] = vals
+        for key, vals in init_hand_metrics.items():
+            if key == "verts_dists":
+                sample_metrics[f"{key}_hand_init"] = vals
+
+        # Metrics after joint optimizations
+        for key, vals in sample_obj_metrics.items():
+            sample_metrics[f"{key}_obj"] = vals
+        for key, vals in sample_hand_metrics.items():
+            if key == "verts_dists":
+                sample_metrics[f"{key}_hand"] = vals
+        for key, vals in aligned_metrics.items():
+            sample_metrics[key] = vals
+        for key, vals in init_aligned_metrics.items():
+            sample_metrics[f"{key}_init"] = vals
         for key, vals in inter_metrics.items():
             sample_metrics[f"{key}"] = vals
         for key, vals in init_inter_metrics.items():

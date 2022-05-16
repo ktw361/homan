@@ -8,12 +8,14 @@ def viz_gtpred_points(fig=None,
                       images=None,
                       save_path="tmp.png",
                       pred_images=None,
-                      point_s=1):
+                      point_s=1,
+                      remove_gap=False,
+                      with_title=True,
+                      fig_res=4):
     sample_nb = len(images)
     col_nb = 1
     if pred_images is not None:
         col_nb += len(pred_images)
-    fig_res = 4
     if fig is None:
         fig = plt.figure(figsize=(int(fig_res * (col_nb - 1)),
                                   int(sample_nb * fig_res)))
@@ -27,7 +29,8 @@ def viz_gtpred_points(fig=None,
             img = images[sample_idx]
             img = npt.numpify(img)
             ax.imshow(img)
-        ax.set_title("input image")
+        if with_title:
+            ax.set_title("input image")
 
         # Second col
         if pred_images is not None:
@@ -38,5 +41,8 @@ def viz_gtpred_points(fig=None,
                 img = npt.numpify(img)
                 ax.imshow(img)
                 ax.axis("off")
-                ax.set_title(pred_img_name)
-    fig.savefig(save_path, bbox_inches="tight")
+                if with_title:
+                    ax.set_title(pred_img_name)
+    if remove_gap:
+        plt.subplots_adjust(wspace=0, hspace=0)
+    fig.savefig(save_path, bbox_inches="tight", pad_inches=0)
