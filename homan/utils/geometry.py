@@ -99,6 +99,7 @@ def compute_random_rotations(B=10, upright=False):
         rotation_matrices (B x 3 x 3).
     """
     if upright:
+        raise NotImplementedError
         a1 = torch.FloatTensor(B, 1).uniform_(0, 2 * math.pi)
         a2 = torch.FloatTensor(B, 1).uniform_(-math.pi / 6, math.pi / 6)
         a3 = torch.FloatTensor(B, 1).uniform_(-math.pi / 12, math.pi / 12)
