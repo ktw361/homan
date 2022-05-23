@@ -284,22 +284,22 @@ class Fitter(object):
 
         def save_webgl():
             import json
-            from neural_renderer import projection
+            # from neural_renderer import projection
             K = model.camintr
-            R = torch.zeros_like(K)
-            t = torch.zeros([1, 3], device=K.device)
-            dist_coeffs = torch.zeros([1, 5], device=K.device)
-            orig_size = 1
+            # R = torch.zeros_like(K)
+            # t = torch.zeros([1, 3], device=K.device)
+            # dist_coeffs = torch.zeros([1, 5], device=K.device)
+            # orig_size = 1
 
             hand_v = fit_hand_verts
             obj_v = fit_obj_verts
-            with torch.no_grad():
-                hand_v_proj = projection(hand_v, K, R, t, dist_coeffs, orig_size)
-                obj_v_proj = projection(obj_v, K, R, t, dist_coeffs, orig_size)
+            # with torch.no_grad():
+            #     hand_v_proj = projection(hand_v, K, R, t, dist_coeffs, orig_size)
+            #     obj_v_proj = projection(obj_v, K, R, t, dist_coeffs, orig_size)
             hand_v = hand_v.detach().squeeze().cpu().numpy().tolist()
             obj_v = obj_v.detach().squeeze().cpu().numpy().tolist()
-            hand_v_proj = hand_v_proj.detach().squeeze().cpu().numpy().tolist()
-            obj_v_proj = obj_v_proj.detach().squeeze().cpu().numpy().tolist()
+            # hand_v_proj = hand_v_proj.detach().squeeze().cpu().numpy().tolist()
+            # obj_v_proj = obj_v_proj.detach().squeeze().cpu().numpy().tolist()
 
             K = K.detach().cpu().numpy() # .tolist()
             fx = K[0, 0, 0]
@@ -308,8 +308,8 @@ class Fitter(object):
             cy = K[0, 1, -1].item()
             webgl_data = dict(
                 hand_v=hand_v, obj_v=obj_v, 
-                hand_v_proj=hand_v_proj, obj_v_proj=obj_v_proj,
-                hand_faces=model.faces_hand.detach().squeeze().cpu().numpy().tolist(),
+                # hand_v_proj=hand_v_proj, obj_v_proj=obj_v_proj,
+                # hand_faces=model.faces_hand.detach().squeeze().cpu().numpy().tolist(),
                 obj_faces=model.faces_object.detach().squeeze().cpu().numpy().tolist(),
                 fov=fov,
                 cx=cx, cy=cy,
