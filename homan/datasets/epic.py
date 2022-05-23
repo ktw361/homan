@@ -641,8 +641,8 @@ class EpicFrame(Epic):
                 hand_df = hoa_dets.loc[(hoa_dets.det_type == 'hand') & (hoa_dets.side == 'left')]
             else:
                 hand_df = hoa_dets.loc[(hoa_dets.det_type == 'hand') & (hoa_dets.side == 'right')]
-            objects = _df2boxes(obj_df)
-            hand = _df2boxes(hand_df)
+            objects = _df2boxes(obj_df)  # xyxy
+            hand = _df2boxes(hand_df)  # xyxy
             annotataions[seq_idx] = dict(
                 bboxes_xyxy={
                     'objects': objects,

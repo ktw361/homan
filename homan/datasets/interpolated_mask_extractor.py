@@ -63,8 +63,7 @@ class InterpolatedMaskExtractor:
                 - score: UNUSED torch.bool, size ()
         """
         num_inst = 1
-        box = boxes_wh[0]
-        bbox = bbox_wh_to_xy(box)
+        bbox = boxes_wh[0]
         square_bbox = make_bbox_square(bbox, self.bbox_expansion)
         square_boxes = torch.FloatTensor(
             np.tile(bbox_wh_to_xy(square_bbox),
