@@ -50,13 +50,6 @@ class ManoModel(nn.Module):
                                  flat_hand_mean=False)
         self.rh_mean = self.rh_mano.hand_mean
         self.lh_mean = self.lh_mano.hand_mean
-        self.rh_mano_flat_pca = mano_load(model_path=os.path.join(
-            mano_root, "MANO_RIGHT.pkl"),
-                                          num_pca_comps=pca_comps,
-                                          use_pca=True,
-                                          model_type="mano",
-                                          batch_size=batch_size,
-                                          flat_hand_mean=True)
         self.rh_mano_pca = mano_load(model_path=os.path.join(
             mano_root, "MANO_RIGHT.pkl"),
                                      model_type="mano",
@@ -64,13 +57,6 @@ class ManoModel(nn.Module):
                                      use_pca=True,
                                      batch_size=batch_size,
                                      flat_hand_mean=False)
-        self.lh_mano_flat_pca = mano_load(model_path=os.path.join(
-            mano_root, "MANO_LEFT.pkl"),
-                                          num_pca_comps=pca_comps,
-                                          model_type="mano",
-                                          use_pca=True,
-                                          batch_size=batch_size,
-                                          flat_hand_mean=True)
         self.lh_mano_pca = mano_load(model_path=os.path.join(
             mano_root, "MANO_LEFT.pkl"),
                                      num_pca_comps=pca_comps,

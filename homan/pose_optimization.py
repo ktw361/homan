@@ -453,7 +453,7 @@ def find_optimal_poses(image_size,
             rotations_init=previous_rotations,
         )
         _, iou, _ = model()
-        verts_trans = model.apply_transformation()
+        verts_trans = model.apply_transformation()  # (num_init, V, 3)
         object_parameters = {
             "rotations": rot6d_to_matrix(model.rotations).detach(),
             "translations": model.translations.detach(),
