@@ -21,40 +21,45 @@ from libyana.lib3d import kcrop
 from libyana.transformutils import handutils
 from manopth import manolayer
 
+OBJ_ROOT="/home/skynet/Zhifan/ihoi/weights/obj_models/"
 MODELS = {
     "bottle": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "02876657/d851cbc873de1c4d3b6eb309177a6753/models/model_normalized_proc.obj",
+        "path": OBJ_ROOT + "bottle_500.obj",
         "scale": 0.2,
     },
-    "jug": {
-        "path":
-        "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
-        "scale": 0.25,
+    "bowl": {
+        "path": OBJ_ROOT + "bowl_500.obj",
+        "scale": 0.2,
     },
-    "pitcher": {
-        "path":
-        "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
-        "scale": 0.25,
-    },
+    # "jug": {
+    #     "path":
+    #     "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+    #     "scale": 0.25,
+    # },
+    # "pitcher": {
+    #     "path":
+    #     "local_data/datasets/ho3dv2/processmodels/019_pitcher_base/textured_simple_400.obj",
+    #     "scale": 0.25,
+    # },
     "plate": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "02880940/95ac294f47fd7d87e0b49f27ced29e3/models/model_normalized_proc.obj",
+        "path": OBJ_ROOT + "plate_500.obj",
         "scale": 0.3,
     },
-    "cup": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "03797390/d75af64aa166c24eacbe2257d0988c9c/models/model_normalized_proc.obj",
+    "mug": {
+        "path": OBJ_ROOT + "mug_1000.obj",
         "scale": 0.12,
     },
-    "phone": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "02992529/7ea27ed05044031a6fe19ebe291582/models/model_normalized_proc.obj",
-        "scale": 0.07
+    "cup": {
+        "path": OBJ_ROOT + "cup_1000.obj",
+        "scale": 0.12,
     },
+    # "phone": {
+    #     "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
+    #     "02992529/7ea27ed05044031a6fe19ebe291582/models/model_normalized_proc.obj",
+    #     "scale": 0.07
+    # },
     "can": {
-        "path": "/gpfsscratch//rech/tan/usk19gv/datasets/ShapeNetCore.v2/"
-        "02946921/3fd8dae962fa3cc726df885e47f82f16/models/model_normalized_proc.obj",
+        "path": OBJ_ROOT + "can_500.obj",
         "scale": 0.2
     }
 }
@@ -110,13 +115,15 @@ class Epic:
             "open", "close"
         ],
         nouns=[
-            # "can",
-            # "cup",
+            "can",
+            "cup",
             # "phone",
             "plate",
             # "pitcher",
             # "jug",
-            # "bottle",
+            "bottle",
+            "bowl",
+            "mug",
         ],
         box_folder="data/boxes",
         track_padding=10,

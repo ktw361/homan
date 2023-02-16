@@ -1,4 +1,4 @@
-name: phosa16_env
+name: homan-baseline
 channels:
   - pytorch
   - pytorch3d
