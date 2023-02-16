@@ -2,10 +2,14 @@
 # -*- coding: utf-8 -*-
 
 import cv2
+import re
 import numpy as np
 import torch
 from PIL import Image
 from tqdm import tqdm
+from typing import Union
+from pathlib import Path
+import bisect
 
 from homan.datasets import collate, epichoa, tarutils
 from homan.datasets.chunkvids import chunk_vid_index
@@ -14,7 +18,7 @@ from homan.utils import bbox as bboxutils
 
 import os
 import pandas as pd
-import pickle
+import pickle, json
 import trimesh
 import warnings
 from libyana.lib3d import kcrop
@@ -98,6 +102,72 @@ def load_models(MODELS, normalize=True):
     return models
 
 
+class PairLocator:
+    """ locate a (vid, frame) in P01_01_0003 """
+    def __init__(self,
+                 result_root='/home/skynet/Zhifan/data/visor-dense/480p',
+                 pair_infos='/home/skynet/Zhifan/data/visor-dense/meta_infos/480p_pair_infos.txt',
+                 verbose=True):
+        self.result_root = Path(result_root)
+        with open(pair_infos) as fp:
+            pair_infos = fp.readlines()
+            pair_infos = [v.strip().split(' ') for v in pair_infos]
+
+        self._build_index(pair_infos)
+        self.verbose = verbose
+
+    def _build_index(self, pair_infos: list):
+        """ pair_infos[i] = ['P01_01_0003', '123', '345']
+        """
+        self._all_full_frames = []
+        self._all_folders = []
+        for folder, st, ed in pair_infos:
+            min_frame = int(st)
+            index = self._hash(folder, min_frame)
+            self._all_full_frames.append(index)
+            self._all_folders.append(folder)
+
+        self._all_full_frames = np.int64(self._all_full_frames)
+        sort_idx = np.argsort(self._all_full_frames)
+        self._all_full_frames = self._all_full_frames[sort_idx]
+        self._all_folders = np.asarray(self._all_folders)[sort_idx]
+
+    @staticmethod
+    def _hash(vid: str, frame: int):
+        pid, sub = vid.split('_')[:2]
+        pid = pid[1:]
+        op1, op2, op3 = map(int, (pid, sub, frame))
+        index = op1 * int(1e15) + op2 * int(1e12) + op3
+        return index
+    
+    def __call__(self, vid, frame):
+        return self.locate(vid, frame)
+
+    def locate(self, vid, frame) -> Union[str, None]:
+        """
+        Returns: a str in DAVIS folder format: {vid}_{%4d}
+            e.g P11_16_0107
+        """
+        query = self._hash(vid, frame)
+        loc = bisect.bisect_right(self._all_full_frames, query)
+        if loc == 0:
+            return None
+        r = self._all_folders[loc-1]
+        r_vid = '_'.join(r.split('_')[:2])
+        if vid != r_vid:
+            if self.verbose:
+                print(f"folder for {vid} not found")
+            return None
+        frames = map(
+            lambda x: int(re.search('[0-9]{10}', x).group(0)),
+            os.listdir(self.result_root/r))
+        if max(frames) < frame:
+            if self.verbose:
+                print(f"Not found in {r}")
+            return None
+        return r
+
+
 class Epic:
     def __init__(
         self,
@@ -128,7 +198,9 @@ class Epic:
         box_folder="data/boxes",
         track_padding=10,
         min_frame_nb=20,
-        epic_root="local_data/datasets/epic",
+        epic_root="/media/skynet/DATA/Datasets/epic-100/rgb", # "local_data/datasets/epic",
+        epic_static_path="/media/skynet/DATA/Zhifan/epic_analysis/hos/tools/model-input-Feb03.json",
+        detections_path="/home/skynet/Zhifan/ihoi/weights/v3_clip_boxes.pkl",
     ):
         """
         Arguments:
@@ -143,12 +215,17 @@ class Epic:
         self.name = "epic"
         self.mode = mode
         self.object_models = load_models(MODELS)
-        self.frame_template = os.path.join(epic_root, "frames",
-                                           "{}/{}/{}/frame_{:010d}.jpg")
+        # self.frame_template = os.path.join(epic_root, "{}/{}/frame_{:010d}.jpg")
+        self.image_fmt = '/media/skynet/DATA/Datasets/visor-dense/480p/%s/%s_frame_%010d.jpg'  # % (folder, vid, frame)
 
-        self.resize_factor = 3
+        with open(epic_static_path, "r") as f:
+            self.clip_infos = json.load(f)
+        with open(detections_path, "rb") as f:
+            self.detections = pickle.load(f)
+
+        self.resize_factor = 1  # 3
         self.frame_nb = frame_nb
-        self.image_size = (640, 360)
+        self.image_size = (640, 360)  # == IMAGE_SIZE
         cache_folder = os.path.join("data", "cache")
         os.makedirs(cache_folder, exist_ok=True)
 
@@ -159,6 +236,127 @@ class Epic:
                                           side="right").th_faces.numpy()
         self.faces = {"left": left_faces, "right": right_faces}
 
+        # annotations, vid_index = self._get_annotatino_vid_index(
+        #     use_cache, nouns, min_frame_nb, frame_step)
+        self.locator  = PairLocator()
+        annotations, vid_index = self._read_annotations_static(
+            min_frame_nb)
+
+        self.annotations = annotations
+        self.vid_index = vid_index
+        self.chunk_index = chunk_vid_index(self.vid_index,
+                                           chunk_size=frame_nb,
+                                           chunk_step=frame_step,
+                                           chunk_spacing=frame_step * frame_nb)
+        self.chunk_index = self.chunk_index[self.chunk_index.object.isin(
+            nouns)]
+        print(f"Working with {len(self.chunk_index)} chunks for {nouns}")
+
+        # Get paired links as neighboured joints
+        self.links = [
+            (0, 1, 2, 3, 4),
+            (0, 5, 6, 7, 8),
+            (0, 9, 10, 11, 12),
+            (0, 13, 14, 15, 16),
+            (0, 17, 18, 19, 20),
+        ]
+
+    def _keep_frame_with_boxes(self, vid, start, end, side, cat):
+        """
+        Returns:
+            frame_idxs: frame indices in which both obj and hand box are present
+            bboxes: dict
+                -objects: (N, 4) left, top, right, bottom
+                -{side}_hand: (N, 4) left, top, right, bottom
+        """
+        vid_boxes = self.detections[vid]
+        valid_frames = []
+        hand = f"{side}_hand"
+        bboxes = {
+            "objects": [],
+            hand: [],
+        }
+        for frame in range(start, end+1):
+            frame_boxes = vid_boxes[frame]
+            if side not in frame_boxes or frame_boxes[side] is None:
+                continue
+            if cat not in frame_boxes or frame_boxes[cat] is None:
+                continue
+            valid_frames.append(frame)
+            bboxes["objects"].append(frame_boxes[cat])
+            bboxes[hand].append(frame_boxes[side])
+        if len(bboxes["objects"]) == 0:
+            return valid_frames, bboxes
+        # detection boxes are xywh
+        _obj_bboxes = np.stack(bboxes["objects"], 0)
+        _hand_bboxes = np.stack(bboxes[hand], 0)
+        _obj_bboxes[:, 2:] += _obj_bboxes[:, :2]
+        _hand_bboxes[:, 2:] += _hand_bboxes[:, :2]
+
+        DETECTION_IMG_SIZE = (854, 480)
+        IMAGE_SIZE = (640, 360)
+
+        _obj_bboxes = _obj_bboxes / (DETECTION_IMG_SIZE * 2) * (IMAGE_SIZE * 2)
+        _hand_bboxes = _hand_bboxes / (DETECTION_IMG_SIZE * 2) * (IMAGE_SIZE * 2)
+
+        bboxes["objects"] = _obj_bboxes
+        bboxes[hand] = _hand_bboxes
+        return valid_frames, bboxes
+
+    def _read_annotations_static(self, min_frame_nb):
+        """
+                        vid_index.append({
+                            "seq_idx": annot_full_key,
+                            "frame_nb": len(frame_idxs),
+                            "start_frame": min(frame_idxs),
+                            "object": annot.noun,
+                            "verb": annot.verb,
+                        })
+                        annotations[annot_full_key] = {
+                            "bboxes_xyxy": bboxes,
+                            "frame_idxs": frame_idxs
+                        }
+                except Exception:
+                    print(f"Skipping idx {annot_idx}")
+            vid_index = pd.DataFrame(vid_index)
+            dataset_annots = {
+                "vid_index": vid_index,
+                "annotations": annotations,
+            }
+        """
+        annotations = {}
+        vid_index = []
+        for _, clip_info in enumerate(self.clip_infos):
+            frame_idxs, bboxes = self._keep_frame_with_boxes(
+                clip_info["vid"], clip_info["start"], clip_info["end"], clip_info["side"],
+                clip_info["cat"])
+            if len(frame_idxs) > min_frame_nb:
+                # annot_key = None
+                # annot_idx = clip_idx
+                # video_id = None
+                # annot_full_key = (video_id, annot_idx, annot_key)
+                annot_full_key = "%s_%d_%d" % (
+                    clip_info['vid'], clip_info['start'], clip_info['end'])
+
+                obj = clip_info["cat"]
+                vid_index.append({
+                    "seq_idx": annot_full_key,
+                    "frame_nb": len(frame_idxs),
+                    "start_frame": min(frame_idxs),
+                    "object": obj,
+                    "verb": None,
+                })
+                annotations[annot_full_key] = {
+                    "bboxes_xyxy": bboxes,
+                    "frame_idxs": frame_idxs
+                }
+        vid_index = pd.DataFrame(vid_index)
+        return annotations, vid_index
+
+    def _get_annotatino_vid_index(self, use_cache, nouns,
+                                  track_padding,
+                                  min_frame_nb,
+                                  frame_step):
         cache_path = 'data/cache/epic_take_putopen_close_can_cup_phone_plate_pitcher_jug_bottle_20.pkl'
         if os.path.exists(cache_path) and use_cache:
             with open(cache_path, "rb") as p_f:
@@ -176,6 +374,9 @@ class Epic:
             print(f"Processing {annot_df.shape[0]} clips for nouns {nouns}")
             vid_index = []
             annotations = {}
+            """
+            annot_idx
+            """
             for annot_idx, (annot_key,
                             annot) in enumerate(tqdm(annot_df.iterrows())):
                 try:
@@ -212,26 +413,7 @@ class Epic:
             }
             with open(cache_path, "wb") as p_f:
                 pickle.dump(dataset_annots, p_f)
-
-        self.annotations = annotations
-        self.tareader = tarutils.TarReader()
-        self.vid_index = vid_index
-        self.chunk_index = chunk_vid_index(self.vid_index,
-                                           chunk_size=frame_nb,
-                                           chunk_step=frame_step,
-                                           chunk_spacing=frame_step * frame_nb)
-        self.chunk_index = self.chunk_index[self.chunk_index.object.isin(
-            nouns)]
-        print(f"Working with {len(self.chunk_index)} chunks for {nouns}")
-
-        # Get paired links as neighboured joints
-        self.links = [
-            (0, 1, 2, 3, 4),
-            (0, 5, 6, 7, 8),
-            (0, 9, 10, 11, 12),
-            (0, 13, 14, 15, 16),
-            (0, 17, 18, 19, 20),
-        ]
+        return annotations, vid_index
 
     def get_roi(self, video_annots, frame_ids, res=640):
         """
@@ -280,7 +462,8 @@ class Epic:
             frame_ids = vid_info.frame_idxs
         seq_frame_idxs = [self.annotations[vid_info.seq_idx]["frame_idxs"]][0]
         frame_idxs = [seq_frame_idxs[frame_id] for frame_id in frame_ids]
-        video_id = vid_info.seq_idx[0]
+        video_id = vid_info.seq_idx # [0]
+        video_id = re.search('P\d{2}_\d{2,3}', video_id)[0]
 
         # Read images from tar file
         images = []
@@ -290,11 +473,11 @@ class Epic:
         roi, affine_trans = self.get_roi(vid_info, frame_ids)
         for frame_id in frame_ids:
             frame_idx = seq_frame_idxs[frame_id]
-            img_path = self.frame_template.format("train", video_id[:3],
-                                                  video_id, frame_idx)
-            img = self.tareader.read_tar_frame(img_path)
-            img = cv2.resize(self.tareader.read_tar_frame(img_path),
-                             self.image_size)
+            folder = self.locator.locate(video_id, frame_idx)
+            # img_path = self.frame_template.format("train", video_id[:3],
+            #                                       video_id, frame_idx)
+            img = cv2.imread(self.image_fmt % (folder, video_id, frame_idx))
+            img = cv2.resize(img, self.image_size)
             img = Image.fromarray(img[:, :, ::-1])
 
             img = handutils.transform_img(img, affine_trans, [res, res])
