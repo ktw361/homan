@@ -26,6 +26,7 @@ from homan.utils.bbox import bbox_xy_to_wh, make_bbox_square
 from homan.visualize import visualize_hand_object
 from homan.viz import cliputils
 from homan.viz.viz_gtpred_points import viz_gtpred_points
+from homan.datasets.visor_mask_extractor import VisorMaskExtractor
 from handmocap.hand_mocap_api import HandMocap
 
 logger = logging.getLogger(__file__)
@@ -76,6 +77,10 @@ def get_args():
     parser.add_argument("--save_indep", action="store_true")
     parser.add_argument("--only_missing", choices=[0, 1], type=int)
     parser.add_argument("--gt_masks", choices=[0, 1], default=0, type=int)
+
+    parser.add_argument("--use_visor_mask", action='store_true')
+    parser.add_argument("--epic_mode", choices=['vid', 'chunk'], default='chunk', type=str)
+
     parser.add_argument("--optimize_mano", choices=[0, 1], default=1, type=int)
     parser.add_argument("--optimize_mano_beta",
                         choices=[0, 1],
@@ -174,16 +179,22 @@ def get_args():
 def main(args):
     setseeds.set_all_seeds(args.seed)
     # Update defaults based on commandline args.
+    use_visor_mask = args.use_visor_mask
     dataset, image_size = getdataset.get_dataset(
         args.dataset,
         split=args.split,
         frame_nb=args.frame_nb,
         box_mode=args.box_mode,
         chunk_step=args.chunk_step,
+        use_visor_mask=use_visor_mask,
+        epic_mode=args.epic_mode,
     )
     print(f"Processing {len(dataset)} samples")
     # Get pretrained networks
-    mask_extractor = MaskExtractor()
+    if use_visor_mask:
+        mask_extractor = VisorMaskExtractor()
+    else:
+        mask_extractor = MaskExtractor()
     hand_predictor = HandMocap(args.hand_checkpoint, args.smpl_path)
 
     all_metrics = defaultdict(list)
@@ -246,6 +257,10 @@ def main(args):
         indep_fit_path = os.path.join(sample_folder, "indep_fit.pkl")
         # Collect 2D and 3D evidence
         if not args.resume:
+            if use_visor_mask:
+                mask_extractor._mask_hand = annots['masks_hand']
+                mask_extractor._mask_obj = annots['masks_obj']
+
             person_parameters, obj_mask_infos, super2d_imgs = get_frame_infos(
                 images_np,
                 hand_predictor,

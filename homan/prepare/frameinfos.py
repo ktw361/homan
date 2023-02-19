@@ -64,6 +64,7 @@ def get_frame_infos(images_np,
                 key: boxes[image_idx]
                 for key, boxes in hand_bboxes.items() if boxes is not None
             }
+            mask_extractor._idx = image_idx
             frame_info = get_frame_info(
                 image,
                 hand_predictor,

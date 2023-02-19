@@ -139,7 +139,7 @@ class PairLocator:
         op1, op2, op3 = map(int, (pid, sub, frame))
         index = op1 * int(1e15) + op2 * int(1e12) + op3
         return index
-    
+
     def __call__(self, vid, frame):
         return self.locate(vid, frame)
 
@@ -201,6 +201,7 @@ class Epic:
         epic_root="/media/skynet/DATA/Datasets/epic-100/rgb", # "local_data/datasets/epic",
         epic_static_path="/media/skynet/DATA/Zhifan/epic_analysis/hos/tools/model-input-Feb03.json",
         detections_path="/home/skynet/Zhifan/ihoi/weights/v3_clip_boxes.pkl",
+        use_visor_mask=False,
     ):
         """
         Arguments:
@@ -217,6 +218,10 @@ class Epic:
         self.object_models = load_models(MODELS)
         # self.frame_template = os.path.join(epic_root, "{}/{}/frame_{:010d}.jpg")
         self.image_fmt = '/media/skynet/DATA/Datasets/visor-dense/480p/%s/%s_frame_%010d.jpg'  # % (folder, vid, frame)
+        self.visor_fmt = '/media/skynet/DATA/Datasets/visor-dense/interpolations/%s/%s_frame_%010d.png' # (vid, vid, frame)
+        cat_data_mapping = '/media/skynet/DATA/Datasets/visor-dense/meta_infos/data_mapping.json'
+        with open(cat_data_mapping, 'r') as fp:
+            self.cat_data_mapping = json.load(fp)
 
         with open(epic_static_path, "r") as f:
             self.clip_infos = json.load(f)
@@ -238,19 +243,20 @@ class Epic:
 
         # annotations, vid_index = self._get_annotatino_vid_index(
         #     use_cache, nouns, min_frame_nb, frame_step)
+        self.use_visor_mask = use_visor_mask
         self.locator  = PairLocator()
         annotations, vid_index = self._read_annotations_static(
             min_frame_nb)
 
         self.annotations = annotations
         self.vid_index = vid_index
-        self.chunk_index = chunk_vid_index(self.vid_index,
-                                           chunk_size=frame_nb,
-                                           chunk_step=frame_step,
-                                           chunk_spacing=frame_step * frame_nb)
-        self.chunk_index = self.chunk_index[self.chunk_index.object.isin(
-            nouns)]
-        print(f"Working with {len(self.chunk_index)} chunks for {nouns}")
+        # self.chunk_index = chunk_vid_index(self.vid_index,
+        #                                    chunk_size=frame_nb,
+        #                                    chunk_step=frame_step,
+        #                                    chunk_spacing=frame_step * frame_nb)
+        # self.chunk_index = self.chunk_index[self.chunk_index.object.isin(
+        #     nouns)]
+        # print(f"Working with {len(self.chunk_index)} chunks for {nouns}")
 
         # Get paired links as neighboured joints
         self.links = [
@@ -303,6 +309,26 @@ class Epic:
         bboxes[hand] = _hand_bboxes
         return valid_frames, bboxes
 
+    def _get_visor_mask(self, vid, frame, side_id, cid, affine_trans, res):
+        """ get visor mask and apply affine_trans to [res, res]
+        Args:
+            cid: is the `visor_name` id, not `cat`
+
+        Returns:
+            mask_hand, mask_obj
+        """
+        path = self.visor_fmt % (vid, vid, frame)
+        mask = Image.open(path).convert('P')
+        mask = mask.resize(self.image_size, Image.NEAREST)
+        mask = handutils.transform_img(mask, affine_trans, [res, res])
+        mask = np.asarray(mask)
+
+        mask_hand = np.zeros_like(mask)
+        mask_obj = np.zeros_like(mask)
+        mask_hand[mask == side_id] = 1
+        mask_obj[mask == cid] = 1
+        return mask_hand, mask_obj
+
     def _read_annotations_static(self, min_frame_nb):
         """
                         vid_index.append({
@@ -338,13 +364,18 @@ class Epic:
                 annot_full_key = "%s_%d_%d" % (
                     clip_info['vid'], clip_info['start'], clip_info['end'])
 
-                obj = clip_info["cat"]
+                cat = clip_info["cat"]
+                visor_name = clip_info["visor_name"]
                 vid_index.append({
                     "seq_idx": annot_full_key,
                     "frame_nb": len(frame_idxs),
                     "start_frame": min(frame_idxs),
-                    "object": obj,
-                    "verb": None,
+
+                    "object": cat,
+                    "visor_name": visor_name,
+                    "side": clip_info["side"],  # 'left' or 'right'
+
+                    # "verb": None,
                 })
                 annotations[annot_full_key] = {
                     "bboxes_xyxy": bboxes,
@@ -465,8 +496,14 @@ class Epic:
         video_id = vid_info.seq_idx # [0]
         video_id = re.search('P\d{2}_\d{2,3}', video_id)[0]
 
+        side_str = 'left hand' if vid_info.side == 'left' else 'right hand'
+        visor_name = vid_info.visor_name
+        side_id = self.cat_data_mapping[video_id][side_str]
+        cid = self.cat_data_mapping[video_id][visor_name]
+
         # Read images from tar file
         images = []
+        masks_hand, masks_obj = [], []
         seq_obj_info = []
         seq_hand_infos = []
         seq_cameras = []
@@ -482,6 +519,12 @@ class Epic:
 
             img = handutils.transform_img(img, affine_trans, [res, res])
             images.append(img)
+
+            if self.use_visor_mask:
+                mask_hand, mask_obj = self._get_visor_mask(
+                    video_id, frame_idx, side_id, cid, affine_trans, res)
+                masks_hand.append(mask_hand)
+                masks_obj.append(mask_obj)
 
             obj_info, hand_infos, camera, setup = self.get_hand_obj_info(
                 vid_info,
@@ -506,6 +549,8 @@ class Epic:
                    setup=setup,
                    frame_idxs=frame_idxs,
                    images=images,
+                   masks_hand=masks_hand,
+                   masks_obj=masks_obj,
                    seq_idx=vid_info.seq_idx)
 
         return obs
