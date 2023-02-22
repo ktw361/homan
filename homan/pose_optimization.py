@@ -251,7 +251,7 @@ def find_optimal_pose(
     best_losses = np.inf
     best_rots = None
     best_trans = None
-    best_loss_single = np.inf
+    best_loss_single = torch.tensor(np.inf)
     best_rots_single = None
     best_trans_single = None
     loop = tqdm(total=num_iterations)

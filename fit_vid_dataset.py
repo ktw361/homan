@@ -200,8 +200,10 @@ def main(args):
     all_metrics = defaultdict(list)
     for sample_idx in range(args.data_offset, len(dataset), args.data_step):
         # Prepare sample folder
-        sample_folder = os.path.join(args.result_root, "samples",
-                                     f"{sample_idx:08d}")
+        annots = dataset[sample_idx]
+        vid_start_end = annots['seq_idx']
+
+        sample_folder = os.path.join(args.result_root, "samples", vid_start_end)
         os.makedirs(sample_folder, exist_ok=True)
         save_path = os.path.join(args.result_root, "results.pkl")
         sample_path = os.path.join(sample_folder, "results.pkl")
@@ -210,7 +212,6 @@ def main(args):
             print(f"Skipping existing {sample_path}")
             continue
 
-        annots = dataset[sample_idx]
         print("Pre-processing detections")
         images = annots["images"]
         right_hands = [
@@ -336,8 +337,9 @@ def main(args):
 
         else:
             # Load from previous computation
-            resume_folder = os.path.join(args.resume, "samples",
-                                         f"{sample_idx:08d}")
+            vid_start_end = annots['seq_idx']
+
+            resume_folder = os.path.join(args.resume, "samples", vid_start_end)
             resume_indep_path = os.path.join(resume_folder, "indep_fit.pkl")
             if args.resume_indep:
                 state_dict = None
