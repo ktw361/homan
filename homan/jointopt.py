@@ -40,13 +40,15 @@ def optimize_hand_object(
     fps=24,
     viz_len=7,
     image_size=640,
+    optimize_hand_pose=True,  # introduced for arctic gt hand
 ):
     """
     Arguments:
         fps (int): frames per second for video visualization
         viz_len (int): number of frames to show
     """
-    os.makedirs(viz_folder, exist_ok=True)
+    if viz_folder is not None:
+        os.makedirs(viz_folder, exist_ok=True)
 
     # Load mesh data.
     verts_object_og = npt.tensorify(objvertices).cuda()
@@ -121,6 +123,7 @@ def optimize_hand_object(
         optimize_mano_beta=optimize_mano_beta,
         optimize_object_scale=optimize_object_scale,
         image_size=image_size,
+        optimize_hand_pose=optimize_hand_pose,
     )
     # Resume from state_dict if provided
     if state_dict is not None:
@@ -156,7 +159,7 @@ def optimize_hand_object(
     imgs = OrderedDict()
     optim_imgs = []
     for step in loop:
-        if step % viz_step == 0:
+        if viz_folder is not None and step % viz_step == 0:
             with torch.no_grad():
                 frontal, top_down = visualize_hand_object(model,
                                                           images,
@@ -190,12 +193,13 @@ def optimize_hand_object(
         loop.set_description(f"Loss {loss.item():.4f}")
         loss.backward()
         optimizer.step()
-    optim_imgs = [optim_imgs[0] for _ in range(30)
-                  ] + optim_imgs + [optim_imgs[-1] for _ in range(50)]
-    np2vid.make_video(optim_imgs,
-                      front_top_path.replace(".jpg", f"{fps}.gif"),
-                      fps=fps)
-    video_path = os.path.join(os.path.dirname(viz_folder), "joint_optim.webm")
-    np2vid.make_video(optim_imgs, video_path, fps=fps)
-    np2vid.make_video(optim_imgs, video_path.replace(".webm", ".mp4"), fps=fps)
+    if viz_folder is not None:
+        optim_imgs = [optim_imgs[0] for _ in range(30)
+                      ] + optim_imgs + [optim_imgs[-1] for _ in range(50)]
+        # np2vid.make_video(optim_imgs,
+        #                   front_top_path.replace(".jpg", f"{fps}.gif"),
+        #                   fps=fps)
+        video_path = os.path.join(os.path.dirname(viz_folder), "joint_optim.webm")
+        # np2vid.make_video(optim_imgs, video_path, fps=fps)
+        np2vid.make_video(optim_imgs, video_path.replace(".webm", ".mp4"), fps=fps)
     return model, dict(loss_evolution), imgs

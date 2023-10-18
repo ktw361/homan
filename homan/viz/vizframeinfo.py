@@ -54,7 +54,7 @@ def viz_frame_info(frame_info, sample_folder="tmp", save=True):
         ax.imshow(npt.numpify(human_masks), alpha=0.5)
     ax.set_title("hand masks")
     if save:
-        super2d_img_path = os.path.join(sample_folder, "detections_masks.png")
+        super2d_img_path = os.path.join(sample_folder, "detections_masks_gt.png")
         fig.savefig(super2d_img_path, bbox_inches="tight")
         plt.close()
         print(f"Saved frame viz to {super2d_img_path}")

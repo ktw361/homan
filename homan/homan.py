@@ -57,6 +57,7 @@ class HOMan(nn.Module):
         optimize_mano_beta=True,
         inter_type="centroid",
         image_size=640,
+        optimize_hand_pose=True,
     ):
         """
         Hands are received in batch of [h_1_t_1, h_2_t_1, ..., h_1_t_2]
@@ -81,13 +82,17 @@ class HOMan(nn.Module):
 
         # Inititalize person parameters
         translation_init = translations_hand.detach().clone()
-        self.translations_hand = nn.Parameter(translation_init,
-                                              requires_grad=True)
         rotations_hand = rotations_hand.detach().clone()
         self.obj_rot_mult = 1  # This scaling has no effect !
         if rotations_hand.shape[-1] == 3:
             rotations_hand = matrix_to_rot6d(rotations_hand)
-        self.rotations_hand = nn.Parameter(rotations_hand, requires_grad=True)
+        if optimize_hand_pose:
+            self.rotations_hand = nn.Parameter(rotations_hand, requires_grad=True)
+            self.translations_hand = nn.Parameter(translation_init,
+                                                requires_grad=True)
+        else:
+            self.register_buffer('rotations_hand', rotations_hand)
+            self.register_buffer('translations_hand', translations_hand)
         if optimize_ortho_cam:
             self.cams_hand = nn.Parameter(cams_hand, requires_grad=True)
         else:
@@ -111,10 +116,13 @@ class HOMan(nn.Module):
                                  torch.ones(1).float() * int_scale_init)
         else:
             self.register_buffer("mano_betas", torch.zeros_like(mano_betas))
-            self.int_scales_hand = nn.Parameter(
-                int_scale_init * torch.ones(1).float(),
-                requires_grad=True,
-            )
+            if optimize_hand_pose:
+                self.int_scales_hand = nn.Parameter(
+                    int_scale_init * torch.ones(1).float(),
+                    requires_grad=True)
+            else:
+                self.register_buffer("int_scales_hand",
+                                    torch.ones(1).float() * int_scale_init)
         self.register_buffer("verts_hand_og", verts_hand_og)
         self.register_buffer("ref_verts2d_hand", ref_verts2d_hand)
 

@@ -83,7 +83,8 @@ def get_frame_infos(images_np,
                                          sample_folder=sample_folder,
                                          save=False)
             super2d_imgs.append(super2d_img)
-        super2d_imgs = np.concatenate(super2d_imgs[::len(super2d_imgs) // 10],
+        num_super2d = min(len(super2d_imgs), 10)
+        super2d_imgs = np.concatenate(super2d_imgs[::len(super2d_imgs) // num_super2d],
                                       1)
     return person_parameters, obj_mask_infos, super2d_imgs
 
@@ -101,7 +102,7 @@ def get_frame_info(image,
     Regress frame hand pose and hand+object masks
 
     Arguments:
-        image (np.ndarray): hand-object image 
+        image (np.ndarray): hand-object image
         hand_bboxes (list): [{'left_hand': np.array(4,), 'right_hand': np.array(4,)}, ...] in xywh format
         hand_predictor: Hand pose regressor
         mask_extractor: Instance segmentor
@@ -122,6 +123,7 @@ def get_frame_info(image,
                                                    viz_path=os.path.join(
                                                        sample_folder,
                                                        "hands.png"))
+    if hand_predictor is not None:
         left_preds = [pred['left_hand'] for pred in mocap_predictions]
     else:
         left_preds = None
@@ -194,7 +196,8 @@ def get_gt_infos(images_np,
     render_gt_masks(annots,
                     obj_mask_infos,
                     person_parameters,
-                    image_size=image_size)
+                    image_size=image_size,
+                    sample_folder=sample_folder)
     gt2d_imgs = []
     for image, obj_params, person_params in zip(images_np, obj_mask_infos,
                                                 person_parameters):
@@ -205,7 +208,9 @@ def get_gt_infos(images_np,
                 "obj_mask_infos": obj_params,
             },
             sample_folder=sample_folder,
+            # save=True)
             save=False)
         gt2d_imgs.append(gt2d_img)
-    gt2d_imgs = np.concatenate(gt2d_imgs[::len(gt2d_imgs) // 2], 1)
+    # gt2d_imgs = np.concatenate(gt2d_imgs[::len(gt2d_imgs) // 2], 1)
+    gt2d_imgs = np.concatenate(gt2d_imgs, 1)
     return gt2d_imgs

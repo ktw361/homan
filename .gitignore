@@ -27,3 +27,6 @@ dex-ycb-toolkit/
 sample_data
 
 results
+local_data/arctic_data
+local_data/arctic_outputs
+local_data/weights

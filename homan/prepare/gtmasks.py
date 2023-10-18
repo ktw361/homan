@@ -22,8 +22,8 @@ def render_gt_masks(annots,
     K = torch.Tensor(K).cuda()
     bs = K.shape[0]
     R = torch.cuda.FloatTensor([[[1, 0, 0], [0, 1, 0], [0, 0,
-                                                        1]]]).repeat(bs, 1, 1)
-    trans = torch.Tensor([0, 0, 0]).cuda().unsqueeze(0).repeat(bs, 1, 1)
+                                                        1]]]) # .repeat(bs, 1, 1)
+    trans = torch.Tensor([0, 0, 0]).cuda().unsqueeze(0) # .repeat(bs, 1, 1)
     renderer = nr.renderer.Renderer(image_size=image_size,
                                     K=K,
                                     R=R,
@@ -74,7 +74,12 @@ def render_gt_masks(annots,
     K_nc[:, :2] = 1 / image_size * K_nc[:, :2]
     renderer.light_intensity_direction = 0
     renderer.light_intensity_ambient = 1
-    renders, sil, depth = renderer(all_verts, all_faces, all_textures, K=K_nc)
+    # renders, sil, depth = renderer(all_verts, all_faces, all_textures, K=K_nc)
+    renders = [None for _ in range(len(all_verts))]
+    for i in range(len(all_verts)):
+        _renders, _, _ = renderer(all_verts[[i]], all_faces[[i]], all_textures[[i]], K=K_nc[[i]])
+        renders[i] = _renders
+    renders = torch.cat(renders, dim=0)
     if debug:
         sample_path = os.path.join(sample_folder, "rendered_gt.png")
         imagify.viz_imgrow(renders[0].clamp(0, 1), path=sample_path)
