@@ -10,7 +10,6 @@ import pickle
 import cv2
 import numpy as np
 import torch
-from pytorch3d.ops.knn import knn_points
 
 from libyana.exputils import argutils
 from libyana.randomutils import setseeds
@@ -20,7 +19,7 @@ from homan.eval import evalviz, pointmetrics, saveresults
 from homan.jointopt import optimize_hand_object
 from homan.lib2d import maskutils
 from homan.pointrend import MaskExtractor
-from homan.arctic_pose_optimization import find_optimal_poses
+from homan.pose_optimization import find_optimal_poses
 from homan.prepare.frameinfos import get_frame_infos, get_gt_infos
 from homan.tracking import preprocess
 from homan.utils.bbox import bbox_xy_to_wh, make_bbox_square
@@ -40,20 +39,17 @@ def get_args():
     parser = argparse.ArgumentParser(
         description="Optimize object meshes w.r.t. hand.")
     parser.add_argument("--dataset",
-                        default="arctic_stable",
+                        default="epichor",
                         choices=[
-                            "arctic_stable"
+                            "epichor", 
                         ],
                         help="Dataset name")
     parser.add_argument("--frame_nb",
                         default=30,
                         type=int,
                         help="Number of video frames to process in a batch")
-    parser.add_argument("--learnt_obj_pose", choices=[0, 1], default=1)
-    parser.add_argument("--gt_mano", choices=[0, 1], default=1, type=int)
-
     parser.add_argument("--box_mode", choices=["gt", "track"], default="gt")
-    parser.add_argument("--gt_masks", choices=[0, 1], default=1, type=int)
+    parser.add_argument("--gt_masks", choices=[0, 1], default=0, type=int)
     parser.add_argument("--data_step", default=1, type=int)
     parser.add_argument("--data_offset", default=0, type=int)
     parser.add_argument("--data_stop", default=99999, type=int)
@@ -67,9 +63,9 @@ def get_args():
                         help="Output directory.")
     parser.add_argument("--num_obj_iterations", default=50, type=int)
     parser.add_argument("--num_joint_iterations", default=201, type=int)
-    parser.add_argument("--num_initializations", default=50, type=int)
+    parser.add_argument("--num_initializations", default=500, type=int)
     parser.add_argument("--mesh_path", type=str, help="Index of mesh ")
-    parser.add_argument("--result_root", default="results/arctic_stable")
+    parser.add_argument("--result_root", default="results/epichor")
     parser.add_argument(
         "--resume",
         help="Path to root folder of previously computed optimization results")
@@ -187,7 +183,6 @@ def main(args):
     )
     print(f"Processing {len(dataset)} samples")
     # Get pretrained networks
-    # mask_extractor = MaskExtractor()
     mask_extractor = VisorMaskExtractor()
     hand_predictor = HandMocap(args.hand_checkpoint, args.smpl_path)
 
@@ -255,9 +250,9 @@ def main(args):
             mask_extractor._mask_hand = annots['masks_hand']
             mask_extractor._mask_obj = annots['masks_obj']
 
-            det_person_parameters, obj_mask_infos, super2d_imgs = get_frame_infos(
+            person_parameters, obj_mask_infos, super2d_imgs = get_frame_infos(
                 images_np,
-                None, # hand_predictor,
+                hand_predictor,
                 mask_extractor,
                 sample_folder=sample_folder,
                 hand_bboxes=hand_bboxes,
@@ -266,18 +261,6 @@ def main(args):
                 debug=args.debug,
                 image_size=image_size,
             )
-            if args.gt_mano:
-                person_parameters = annots['gt_person_parameters']
-                for i in range(len(person_parameters)):
-                    for k, v in person_parameters[i].items():
-                        if isinstance(v, torch.Tensor):
-                            person_parameters[i][k] = v.cuda()
-                for i in range(len(det_person_parameters)):
-                    person_parameters[i]['masks'] = det_person_parameters[i]['masks']
-                    person_parameters[i]['cams'] = torch.ones([1, 3], device='cuda', dtype=torch.float32)  # not really used
-                    # person_parameters[i]['cams'] = det_person_parameters[i]['cams']  # not really used
-            else:
-                person_parameters = det_person_parameters
 
             super2d_img_path = os.path.join(sample_folder,
                                             "detections_masks.png")
@@ -302,9 +285,6 @@ def main(args):
             obj_verts_can = annots["objects"][0]['canverts3d']
             obj_faces = annots["objects"][0]['faces']
 
-            rotations_inits = annots['rotations_inits'].cuda()
-            translations_inits = annots['translations_inits'].cuda()
-
             # Compute object pose initializations
             object_parameters = find_optimal_poses(
                 images=images_np,
@@ -312,9 +292,7 @@ def main(args):
                 vertices=obj_verts_can[0],
                 faces=obj_faces[0],
                 annotations=obj_mask_infos,
-                rotations_inits=rotations_inits,
-                translations_inits=translations_inits,
-                # num_initializations=args.num_initializations,
+                num_initializations=args.num_initializations,
                 num_iterations=args.num_obj_iterations,
                 Ks=camintr,
                 viz_path=os.path.join(sample_folder, "optimal_pose.png"),
@@ -352,11 +330,15 @@ def main(args):
 
             resume_folder = os.path.join(args.resume, "samples", vid_start_end)
             resume_indep_path = os.path.join(resume_folder, "indep_fit.pkl")
-            if args.resume_indep:  # default False
+            if args.resume_indep:
                 state_dict = None
             else:
                 resume_joint_path = os.path.join(resume_folder, "joint_fit.pt")
-                state_dict = torch.load(resume_joint_path)["state_dict"]
+                try:
+                    state_dict = torch.load(resume_joint_path)["state_dict"]
+                except Exception as e:
+                    print(f'skipping {resume_joint_path} due to {e}')
+                    continue
                 state_dict = {
                     key: val.cuda()
                     for key, val in state_dict.items()
@@ -389,7 +371,6 @@ def main(args):
             state_dict=state_dict,
             viz_step=args.viz_step,
             viz_folder=None, #os.path.join(sample_folder, "jointoptim"),
-            optimize_hand_pose=False,
         )
         save_dict = {
             "state_dict": {
@@ -427,13 +408,6 @@ def main(args):
             viz_folder=None, #os.path.join(sample_folder, "jointoptim"),
             optimize_hand_pose=False,
         )
-        # save_dict = {
-        #     "state_dict": {
-        #         key: val.contiguous().cpu()
-        #         for key, val in model.state_dict().items()
-        #         if ("mano_model" not in key)
-        #     }
-        # }
         # torch.save(save_dict, os.path.join(sample_folder, "joint_fit.pt"))
         # torch.save(model, os.path.join(sample_folder, "model.pth"))
 
@@ -445,26 +419,6 @@ def main(args):
         fit_obj_verts, _ = model.get_verts_object()
         fit_hand_verts, _ = model.get_verts_hand()
 
-        if "objects" in setup:
-            gt_obj_verts = np.concatenate(
-                [annot["verts3d"] for annot in annots["objects"]], 1)
-        gt_hand_verts = []
-        if "right_hand" in setup:
-            gt_hand_verts.append(
-                np.concatenate([
-                    hand["verts3d"] for hand in annots["hands"]
-                    if hand["label"] == "right_hand"
-                ], 1))
-        if "left_hand" in setup:
-            gt_hand_verts.append(
-                np.concatenate([
-                    hand["verts3d"]
-                    for hand in annots["hands"] if hand["label"] == "left_hand"
-                ], 1))
-
-        gt_hand_verts = fit_hand_verts.new(gt_hand_verts)
-        gt_obj_verts = fit_obj_verts.new(gt_obj_verts)
-
         # viz_len = min(5, args.frame_nb)
         viz_len = min(5, args.frame_nb)
         with torch.no_grad():
@@ -473,80 +427,32 @@ def main(args):
                                                       dist=4,
                                                       viz_len=args.frame_nb,
                                                       image_size=image_size)
-            frontal_gt_only, top_down_gt_only = visualize_hand_object(
-                model,
-                images_np,
-                dist=4,
-                viz_len=args.frame_nb,
-                image_size=image_size,
-                verts_hand_gt=gt_hand_verts,
-                verts_object_gt=gt_obj_verts,
-                gt_only=True)
 
-        with torch.no_grad():
-            # GT + pred overlay renders
-            frontal_gt, top_down_gt = visualize_hand_object(
-                model,
-                images_np,
-                dist=4,
-                verts_hand_gt=gt_hand_verts,
-                verts_object_gt=gt_obj_verts,
-                viz_len=args.frame_nb,
-                image_size=image_size,
-            )
-            # GT + init overlay renders
-            frontal_init_gt, top_down_init_gt = visualize_hand_object(
-                model,
-                images_np[:viz_len],
-                dist=4,
-                verts_hand_gt=gt_hand_verts,
-                verts_object_gt=gt_obj_verts,
-                viz_len=viz_len,
-                init=True,
-                image_size=image_size,
-            )
         # pred verts need to be brought back from square image space
         viz_path = os.path.join(sample_folder, "final_points.png")
         viz_gtpred_points(images=images_np[:viz_len],
                           pred_images={
                               "frontal_pred": frontal[:viz_len],
                               "topdown_pred": top_down[:viz_len],
-                              "frontal_pred+gt": frontal_gt[:viz_len],
-                              "topdown_pred+gt": top_down_gt[:viz_len],
-                              "frontal_init+gt": frontal_init_gt,
-                              "topdown_init+gt": top_down_init_gt
                           },
                           save_path=viz_path)
         # Save predicted video clip
         top_down = cliputils.add_clip_text(top_down, "Pred")
-        top_down_gt = cliputils.add_clip_text(top_down_gt, "Pred + GT")
-        top_down_gt_only = cliputils.add_clip_text(top_down_gt_only,
-                                                   "Ground Truth")
 
         clip = np.concatenate([
-            np.concatenate([np.stack(images_np), frontal, frontal_gt_only], 2),
-            np.concatenate([top_down_gt, top_down, top_down_gt_only], 2)
+            np.concatenate([np.stack(images_np), frontal], 2),
+            np.concatenate([np.zeros_like(top_down), top_down], 2)
         ], 1)
+        # evalviz.make_video_np(clip,
+        #                       viz_path.replace(".png", ".webm"),
+        #                       resize_factor=0.5)
         optim_vid_path = os.path.join(sample_folder, "final_points.mp4")
         evalviz.make_video_np(clip, optim_vid_path, resize_factor=0.5)
+        # evalviz.make_video_np(clip,
+        #                       optim_vid_path.replace(".webm", ".mp4"),
+        #                       resize_factor=0.5)
 
         with torch.no_grad():
-            sample_obj_metrics = pointmetrics.get_point_metrics(
-                gt_obj_verts, fit_obj_verts)
-            sample_hand_metrics = pointmetrics.get_point_metrics(
-                gt_hand_verts.view(-1, 778, 3),
-                fit_hand_verts.view(-1, 778, 3))
-            init_obj_metrics = pointmetrics.get_point_metrics(
-                gt_obj_verts, init_obj_verts)
-            init_hand_metrics = pointmetrics.get_point_metrics(
-                gt_hand_verts.view(-1, 778, 3),
-                init_hand_verts.view(-1, 778, 3))
-            aligned_metrics = pointmetrics.get_align_metrics(
-                gt_hand_verts.view(-1, 778, 3),
-                fit_hand_verts.view(-1, 778, 3), gt_obj_verts, fit_obj_verts)
-            init_aligned_metrics = pointmetrics.get_align_metrics(
-                gt_hand_verts.view(-1, 778, 3),
-                fit_hand_verts.view(-1, 778, 3), gt_obj_verts, fit_obj_verts)
             inter_metrics = pointmetrics.get_inter_metrics(
                 fit_hand_verts, fit_obj_verts, model.faces_hand,
                 model.faces_object)
@@ -555,23 +461,7 @@ def main(args):
                 model.faces_object)
 
         sample_metrics = {}
-        # Metrics before joint optimization
-        for key, vals in init_obj_metrics.items():
-            sample_metrics[f"{key}_obj_init"] = vals
-        for key, vals in init_hand_metrics.items():
-            if key == "verts_dists":
-                sample_metrics[f"{key}_hand_init"] = vals
-
         # Metrics after joint optimizations
-        for key, vals in sample_obj_metrics.items():
-            sample_metrics[f"{key}_obj"] = vals
-        for key, vals in sample_hand_metrics.items():
-            if key == "verts_dists":
-                sample_metrics[f"{key}_hand"] = vals
-        for key, vals in aligned_metrics.items():
-            sample_metrics[key] = vals
-        for key, vals in init_aligned_metrics.items():
-            sample_metrics[f"{key}_init"] = vals
         for key, vals in inter_metrics.items():
             sample_metrics[f"{key}"] = vals
         for key, vals in init_inter_metrics.items():
@@ -586,29 +476,19 @@ def main(args):
                     "losses": loss_evolution,
                     "metrics": sample_metrics,
                     "imgs": imgs,
+                    # "show_img_paths": {
+                    #     "pred_gt": viz_path,
+                    #     "super2d": super2d_img_path,
+                    #     "last": imgs[max(list(imgs.keys()))]
+                    # },
                 }, p_f)
         saveresults.dump(args, all_metrics, save_path)
 
         # EPIC-HOR metrics
         with torch.no_grad():
             verts_pred, _ = model.get_verts_object()  # (N, V, 3)
-            verts_gt = annots['objects'][0]['verts3d'].cuda()
-            diameter = annots['diameter']
-            # ADD & ADD-CLS
-            v2v_dist = ((verts_gt - verts_pred)**2).sum(dim=2).sqrt()  # (N, V)
-            add_010 = (v2v_dist < 0.10 * diameter).sum(dim=1).float() / v2v_dist.size(1)  # (N,)
-            add_010_mean = add_010.mean()
-            add_cls_010 = (v2v_dist.mean() < 0.10 * diameter).float()  # (N,)
-            # ADD-S & ADD-S-CLS
-            v2nn_dist = knn_points(verts_pred, verts_gt, K=1).dists
-            add_s_010 = (v2nn_dist < 0.10 * diameter).sum(dim=1).float() / v2nn_dist.size(1)
-            add_s_010_mean = add_s_010.mean()
-            add_s_cls_010 = (v2nn_dist.mean() < 0.10 * diameter).float()
-
-            add_s_002 = (v2nn_dist < 0.02 * diameter).sum(dim=1).float() / v2nn_dist.size(1)
-            add_s_002_mean = add_s_002.mean()
-            add_s_cls_002 = (v2nn_dist.mean() < 0.02 * diameter).float()
-
+            # verts_gt = annots['objects'][0]['verts3d'].cuda()
+            # diameter = annots['diameter']
             # IOU
             _, sil_metric_dict = model.losses.compute_sil_loss_object(
                 verts=verts_pred, faces=model.faces_object)
@@ -617,15 +497,7 @@ def main(args):
                 verts=verts_pred, faces=model.faces_object)
             iou = sil_metric_dict['iou_object']
         rows = [
-            dict(
-                iou=iou, 
-                add_010=add_010_mean.item(),
-                add_cls_010=add_cls_010.item(),
-                add_s_010=add_s_010_mean.item(),
-                add_s_cls_010=add_s_cls_010.item(),
-                add_s_002=add_s_002_mean.item(),
-                add_s_cls_002=add_s_cls_002.item(),
-            )
+            dict(iou=iou)
         ]
         pd.DataFrame(rows).to_csv(
             os.path.join(sample_folder, "epichor_metric.csv"))

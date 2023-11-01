@@ -84,7 +84,7 @@ class ArcticStable:
         Get square ROI in xyxy format
 
         Args:
-            hbox: (4,) xywh
+            hbox: (4,) xywh (xyxy?)
             obox: (4,) xywh
 
         Returns:

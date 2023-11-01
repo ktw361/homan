@@ -4,6 +4,7 @@ from homan.datasets.core50 import Core50
 from homan.datasets.epic import Epic
 from homan.datasets.ho3d import HO3D
 from homan.datasets.arctic_stable import ArcticStable
+from homan.datasets.epichor_round3 import EPICHOR_ROUND3
 
 
 def get_dataset(
@@ -43,7 +44,7 @@ def get_dataset(
                          chunk_step=chunk_step,
                          use_cache=use_cache,
                          mode="chunk")
-    elif dataset == 'epichor_round3':
+    elif dataset == 'epic':
         image_size = 640
         dataset = Epic(mode=epic_mode,
                        frame_nb=frame_nb,
@@ -53,6 +54,9 @@ def get_dataset(
     elif dataset == 'arctic_stable':
         image_size = 640
         dataset = ArcticStable(frame_nb=frame_nb)
+    elif dataset == 'epichor':
+        image_size = 640
+        dataset = EPICHOR_ROUND3(frame_nb=frame_nb)
     else:
         raise ValueError(
             f"{dataset} not in [ho3d|contactpose|core50]")

@@ -10,6 +10,7 @@ import pickle
 import cv2
 import numpy as np
 import torch
+import torch.nn as nn
 from pytorch3d.ops.knn import knn_points
 
 from libyana.exputils import argutils
@@ -65,8 +66,8 @@ def get_args():
     parser.add_argument("--output_dir",
                         default="output",
                         help="Output directory.")
-    parser.add_argument("--num_obj_iterations", default=50, type=int)
-    parser.add_argument("--num_joint_iterations", default=201, type=int)
+    parser.add_argument("--num_obj_iterations", default=0, type=int)
+    parser.add_argument("--num_joint_iterations", default=0, type=int)
     parser.add_argument("--num_initializations", default=50, type=int)
     parser.add_argument("--mesh_path", type=str, help="Index of mesh ")
     parser.add_argument("--result_root", default="results/arctic_stable")
@@ -345,26 +346,6 @@ def main(args):
             #     pickle.dump(indep_fit_res, p_f)
             state_dict = None
 
-        else:
-            assert False
-            # Load from previous computation
-            vid_start_end = annots['annot_full_key']
-
-            resume_folder = os.path.join(args.resume, "samples", vid_start_end)
-            resume_indep_path = os.path.join(resume_folder, "indep_fit.pkl")
-            if args.resume_indep:  # default False
-                state_dict = None
-            else:
-                resume_joint_path = os.path.join(resume_folder, "joint_fit.pt")
-                state_dict = torch.load(resume_joint_path)["state_dict"]
-                state_dict = {
-                    key: val.cuda()
-                    for key, val in state_dict.items()
-                }
-            with open(resume_indep_path, "rb") as p_f:
-                indep_fit_res = pickle.load(p_f)
-            super2d_img_path = indep_fit_res["super2d_img_path"]
-
         # Extract weight dictionary from arguments
         loss_weights = {
             key: val
@@ -391,203 +372,12 @@ def main(args):
             viz_folder=None, #os.path.join(sample_folder, "jointoptim"),
             optimize_hand_pose=False,
         )
-        save_dict = {
-            "state_dict": {
-                key: val.contiguous() # .cpu
-                for key, val in model.state_dict().items()
-                if ("mano_model" not in key)
-            }
-        }
 
-        # Run step-2 joint optimization 
-        # adjust loss_weight
-        args.lw_collision = 0.001 
-        args.lw_contact = 1
-        loss_weights = {
-            key: val
-            for key, val in vars(args).items() if "lw_" in key
-        }
-        state_dict = save_dict
-        model, loss_evolution, imgs = optimize_hand_object(
-            person_parameters=indep_fit_res["person_parameters"],
-            object_parameters=indep_fit_res["object_parameters"],
-            hand_proj_mode=args.hand_proj_mode,
-            objvertices=indep_fit_res["obj_verts_can"],
-            objfaces=indep_fit_res["obj_faces"],
-            optimize_mano=args.optimize_mano,
-            optimize_mano_beta=args.optimize_mano_beta,
-            optimize_object_scale=args.optimize_object_scale,
-            loss_weights=loss_weights,
-            image_size=image_size,
-            num_iterations=args.num_joint_iterations,
-            images=images_np,
-            camintr=camintr_nc,
-            state_dict=state_dict,
-            viz_step=args.viz_step,
-            viz_folder=None, #os.path.join(sample_folder, "jointoptim"),
-            optimize_hand_pose=False,
-        )
-        # save_dict = {
-        #     "state_dict": {
-        #         key: val.contiguous().cpu()
-        #         for key, val in model.state_dict().items()
-        #         if ("mano_model" not in key)
-        #     }
-        # }
-        # torch.save(save_dict, os.path.join(sample_folder, "joint_fit.pt"))
-        # torch.save(model, os.path.join(sample_folder, "model.pth"))
-
-        # Save initial optimization results
-        # with open(indep_fit_path, "wb") as p_f:
-        #     pickle.dump(indep_fit_res, p_f)
-        init_obj_verts = model.verts_object_init
-        init_hand_verts = model.verts_hand_init
-        fit_obj_verts, _ = model.get_verts_object()
-        fit_hand_verts, _ = model.get_verts_hand()
-
-        if "objects" in setup:
-            gt_obj_verts = np.concatenate(
-                [annot["verts3d"] for annot in annots["objects"]], 1)
-        gt_hand_verts = []
-        if "right_hand" in setup:
-            gt_hand_verts.append(
-                np.concatenate([
-                    hand["verts3d"] for hand in annots["hands"]
-                    if hand["label"] == "right_hand"
-                ], 1))
-        if "left_hand" in setup:
-            gt_hand_verts.append(
-                np.concatenate([
-                    hand["verts3d"]
-                    for hand in annots["hands"] if hand["label"] == "left_hand"
-                ], 1))
-
-        gt_hand_verts = fit_hand_verts.new(gt_hand_verts)
-        gt_obj_verts = fit_obj_verts.new(gt_obj_verts)
-
-        # viz_len = min(5, args.frame_nb)
-        viz_len = min(5, args.frame_nb)
-        with torch.no_grad():
-            frontal, top_down = visualize_hand_object(model,
-                                                      images_np,
-                                                      dist=4,
-                                                      viz_len=args.frame_nb,
-                                                      image_size=image_size)
-            frontal_gt_only, top_down_gt_only = visualize_hand_object(
-                model,
-                images_np,
-                dist=4,
-                viz_len=args.frame_nb,
-                image_size=image_size,
-                verts_hand_gt=gt_hand_verts,
-                verts_object_gt=gt_obj_verts,
-                gt_only=True)
-
-        with torch.no_grad():
-            # GT + pred overlay renders
-            frontal_gt, top_down_gt = visualize_hand_object(
-                model,
-                images_np,
-                dist=4,
-                verts_hand_gt=gt_hand_verts,
-                verts_object_gt=gt_obj_verts,
-                viz_len=args.frame_nb,
-                image_size=image_size,
-            )
-            # GT + init overlay renders
-            frontal_init_gt, top_down_init_gt = visualize_hand_object(
-                model,
-                images_np[:viz_len],
-                dist=4,
-                verts_hand_gt=gt_hand_verts,
-                verts_object_gt=gt_obj_verts,
-                viz_len=viz_len,
-                init=True,
-                image_size=image_size,
-            )
-        # pred verts need to be brought back from square image space
-        viz_path = os.path.join(sample_folder, "final_points.png")
-        viz_gtpred_points(images=images_np[:viz_len],
-                          pred_images={
-                              "frontal_pred": frontal[:viz_len],
-                              "topdown_pred": top_down[:viz_len],
-                              "frontal_pred+gt": frontal_gt[:viz_len],
-                              "topdown_pred+gt": top_down_gt[:viz_len],
-                              "frontal_init+gt": frontal_init_gt,
-                              "topdown_init+gt": top_down_init_gt
-                          },
-                          save_path=viz_path)
-        # Save predicted video clip
-        top_down = cliputils.add_clip_text(top_down, "Pred")
-        top_down_gt = cliputils.add_clip_text(top_down_gt, "Pred + GT")
-        top_down_gt_only = cliputils.add_clip_text(top_down_gt_only,
-                                                   "Ground Truth")
-
-        clip = np.concatenate([
-            np.concatenate([np.stack(images_np), frontal, frontal_gt_only], 2),
-            np.concatenate([top_down_gt, top_down, top_down_gt_only], 2)
-        ], 1)
-        optim_vid_path = os.path.join(sample_folder, "final_points.mp4")
-        evalviz.make_video_np(clip, optim_vid_path, resize_factor=0.5)
-
-        with torch.no_grad():
-            sample_obj_metrics = pointmetrics.get_point_metrics(
-                gt_obj_verts, fit_obj_verts)
-            sample_hand_metrics = pointmetrics.get_point_metrics(
-                gt_hand_verts.view(-1, 778, 3),
-                fit_hand_verts.view(-1, 778, 3))
-            init_obj_metrics = pointmetrics.get_point_metrics(
-                gt_obj_verts, init_obj_verts)
-            init_hand_metrics = pointmetrics.get_point_metrics(
-                gt_hand_verts.view(-1, 778, 3),
-                init_hand_verts.view(-1, 778, 3))
-            aligned_metrics = pointmetrics.get_align_metrics(
-                gt_hand_verts.view(-1, 778, 3),
-                fit_hand_verts.view(-1, 778, 3), gt_obj_verts, fit_obj_verts)
-            init_aligned_metrics = pointmetrics.get_align_metrics(
-                gt_hand_verts.view(-1, 778, 3),
-                fit_hand_verts.view(-1, 778, 3), gt_obj_verts, fit_obj_verts)
-            inter_metrics = pointmetrics.get_inter_metrics(
-                fit_hand_verts, fit_obj_verts, model.faces_hand,
-                model.faces_object)
-            init_inter_metrics = pointmetrics.get_inter_metrics(
-                init_hand_verts, init_obj_verts, model.faces_hand,
-                model.faces_object)
-
-        sample_metrics = {}
-        # Metrics before joint optimization
-        for key, vals in init_obj_metrics.items():
-            sample_metrics[f"{key}_obj_init"] = vals
-        for key, vals in init_hand_metrics.items():
-            if key == "verts_dists":
-                sample_metrics[f"{key}_hand_init"] = vals
-
-        # Metrics after joint optimizations
-        for key, vals in sample_obj_metrics.items():
-            sample_metrics[f"{key}_obj"] = vals
-        for key, vals in sample_hand_metrics.items():
-            if key == "verts_dists":
-                sample_metrics[f"{key}_hand"] = vals
-        for key, vals in aligned_metrics.items():
-            sample_metrics[key] = vals
-        for key, vals in init_aligned_metrics.items():
-            sample_metrics[f"{key}_init"] = vals
-        for key, vals in inter_metrics.items():
-            sample_metrics[f"{key}"] = vals
-        for key, vals in init_inter_metrics.items():
-            sample_metrics[f"{key}_init"] = vals
-
-        for key, vals in sample_metrics.items():
-            all_metrics[key].extend(vals)
-        with open(sample_path, "wb") as p_f:
-            pickle.dump(
-                {
-                    "opts": vars(args),
-                    "losses": loss_evolution,
-                    "metrics": sample_metrics,
-                    "imgs": imgs,
-                }, p_f)
-        saveresults.dump(args, all_metrics, save_path)
+        # Load the results
+        homan_object_poses = torch.load(os.path.join(sample_folder, "homan_object_poses.pth"))
+        model.translations_object = nn.Parameter(homan_object_poses['translations_object'])
+        model.rotations_object = nn.Parameter(homan_object_poses['rotations_object'])
+        model.cuda()
 
         # EPIC-HOR metrics
         with torch.no_grad():
@@ -627,14 +417,16 @@ def main(args):
                 add_s_cls_002=add_s_cls_002.item(),
             )
         ]
-        pd.DataFrame(rows).to_csv(
-            os.path.join(sample_folder, "epichor_metric.csv"))
+        df = pd.DataFrame(rows)
+        print(df)
+        # pd.DataFrame(rows).to_csv(
+        #     os.path.join(sample_folder, "epichor_metric.csv"))
         # Save lightweight poses
-        homan_object_poses = {
-            'translations_object': model.translations_object.cpu(),
-            'rotations_object': model.rotations_object.cpu(),
-        }
-        torch.save(homan_object_poses, os.path.join(sample_folder, "homan_object_poses.pth"))
+        # homan_object_poses = {
+        #     'translations_object': model.translations_object.cpu(),
+        #     'rotations_object': model.translations_object.cpu(),
+        # }
+        # torch.save(homan_object_poses, os.path.join(sample_folder, "homan_object_poses.pth"))
 
 
 if __name__ == "__main__":

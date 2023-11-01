@@ -41,6 +41,7 @@ def get_args():
                         default="ho3d",
                         choices=[
                             "contactpose", "ho3d", "fhb", "epic", "core50",
+                            "epichor", "arctic_stable"
                             "inhandycb", "ourycb"
                         ],
                         help="Dataset name")
@@ -52,7 +53,7 @@ def get_args():
                         default=10,
                         type=int,
                         help="Number of video frames to process in a batch")
-    parser.add_argument("--data_step", default=100, type=int)
+    parser.add_argument("--data_step", default=1, type=int)
     parser.add_argument("--data_offset", default=0, type=int)
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--split",
@@ -81,10 +82,10 @@ def get_args():
     parser.add_argument("--use_visor_mask", action='store_true')
     parser.add_argument("--epic_mode", choices=['vid', 'chunk'], default='chunk', type=str)
 
-    parser.add_argument("--optimize_mano", choices=[0, 1], default=1, type=int)
+    parser.add_argument("--optimize_mano", choices=[0, 1], default=0, type=int)
     parser.add_argument("--optimize_mano_beta",
                         choices=[0, 1],
-                        default=1,
+                        default=0,
                         type=int)
     parser.add_argument("--optimize_object_scale",
                         choices=[0, 1],
@@ -200,6 +201,8 @@ def main(args):
     all_metrics = defaultdict(list)
     for sample_idx in range(args.data_offset, len(dataset), args.data_step):
         # Prepare sample folder
+        # if sample_idx != target_idx:
+        #     continue
         annots = dataset[sample_idx]
         vid_start_end = annots['seq_idx']
 
@@ -345,7 +348,11 @@ def main(args):
                 state_dict = None
             else:
                 resume_joint_path = os.path.join(resume_folder, "joint_fit.pt")
-                state_dict = torch.load(resume_joint_path)["state_dict"]
+                try:
+                    state_dict = torch.load(resume_joint_path)["state_dict"]
+                except Exception as e:
+                    print(f'skipping {resume_joint_path} due to {e}')
+                    continue
                 state_dict = {
                     key: val.cuda()
                     for key, val in state_dict.items()
@@ -377,7 +384,7 @@ def main(args):
             camintr=camintr_nc,
             state_dict=state_dict,
             viz_step=args.viz_step,
-            viz_folder=os.path.join(sample_folder, "jointoptim"),
+            viz_folder=None, #os.path.join(sample_folder, "jointoptim"),
         )
         save_dict = {
             "state_dict": {
@@ -387,9 +394,10 @@ def main(args):
             }
         }
         torch.save(save_dict, os.path.join(sample_folder, "joint_fit.pt"))
+        torch.save(model, os.path.join(sample_folder, "model.pth"))
         # Save initial optimization results
-        with open(indep_fit_path, "wb") as p_f:
-            pickle.dump(indep_fit_res, p_f)
+        # with open(indep_fit_path, "wb") as p_f:
+        #     pickle.dump(indep_fit_res, p_f)
         init_obj_verts = model.verts_object_init
         init_hand_verts = model.verts_hand_init
         fit_obj_verts, _ = model.get_verts_object()
@@ -541,11 +549,11 @@ def main(args):
                     "losses": loss_evolution,
                     "metrics": sample_metrics,
                     "imgs": imgs,
-                    "show_img_paths": {
-                        "pred_gt": viz_path,
-                        "super2d": super2d_img_path,
-                        "last": imgs[max(list(imgs.keys()))]
-                    },
+                    # "show_img_paths": {
+                    #     "pred_gt": viz_path,
+                    #     "super2d": super2d_img_path,
+                    #     "last": imgs[max(list(imgs.keys()))]
+                    # },
                 }, p_f)
         saveresults.dump(args, all_metrics, save_path)
 
