@@ -18,6 +18,12 @@ from homan.utils.camera import (
 )
 from homan.utils.geometry import combine_verts, matrix_to_rot6d, rot6d_to_matrix
 
+""" SCA, PD, IV """
+from homan.utils.mesh_interaction import mesh_distance_approx
+from homan.interactions import scenesdf
+from hocontact.utils.libmesh.inside_mesh import check_mesh_contains  #CPF
+from libzhifan.geometry import SimpleMesh
+
 from libyana.conversions import npt
 from libyana.lib3d import trans3d
 from libyana.verify.checkshape import check_shape
@@ -425,6 +431,91 @@ class HOMan(nn.Module):
         ]
         masks = torch.stack(all_masks, 1)
         return lossutils.compute_ordinal_depth_loss(masks, silhouettes, depths)
+
+    def get_sca(self, vh, vo):
+        """ Stable Contact Area as a metric
+        Returns:
+            avg_sca: scalar
+            mean_sca: scalar
+        """
+        def compute_indices_ious(inds_list):
+            """
+                inds_list: list of N sets
+                Returns:
+                    iou: (4, )
+            """
+            N = len(inds_list)
+            ious = np.empty([N, N], dtype=np.float32)
+            for i in range(N):
+                for j in range(i, N):
+                    ind_i = inds_list[i]
+                    ind_j = inds_list[j]
+                    inter = ind_i.intersection(ind_j)
+                    union = ind_i.union(ind_j)
+                    ious[i, j] = len(inter) / (len(union) + 1e-5)
+                    ious[j, i] = ious[i, j]
+            return ious
+        # vh, _ = self.get_verts_hand()
+        # vo = self.get_verts_object()  # (11, 421, 3)
+        fo = self.faces_object  # (T, V, 3)
+        # vh = self.v_hand  # (T, 778, 3)
+        fh = self.faces_hand.long()  # (T, 1538, 3)
+        _, d2 = mesh_distance_approx(vh, vo, fh[0], fo[0])
+
+        lb, ub = -0.01, 0.01
+        indices_list = []
+        for f in range(d2.shape[0]):
+            nz = torch.nonzero((d2[f] > lb) & (d2[f] < ub)).view(-1)
+            indices_list.append(set(nz.tolist()))
+        sca = compute_indices_ious(indices_list)
+        avg_sca = sca.mean()
+        min_sca = sca.min()
+        return avg_sca, min_sca
+
+    def get_iv(self, vh, vo):
+        """ Max Intersecting volume as a metric
+        """
+        T = len(self.translations_hand)
+        pitch = 0.005
+        vox_size = np.power(pitch*100, 3)
+        max_iv = 0.0
+        fo = self.faces_object  # (N, F, 3)
+        fh = self.faces_hand   # (N, F, 3)
+        for t in range(T):
+            mhand = SimpleMesh(vh[t, ...], fh[0])
+            mobj = SimpleMesh(vo[t, ...], fo[0])
+            # mhand, mobj = self.get_meshes(0, t)  # (0, t)
+            obj_pts = mobj.voxelized(pitch=pitch).points
+            inside = check_mesh_contains(mhand, obj_pts)
+            volume = inside.sum() * vox_size
+            max_iv = max(max_iv, volume)
+        return torch.as_tensor(max_iv)
+
+    def penetration_depth(self, vh, vo, h2o_only=True) -> float:
+        """
+        Max penetration depth over all frames,
+        NOTE: report in mm
+        Returns:
+            - hand into object (N, T)
+            - object into hand (N, T)
+        """
+        N, T = 1, len(self.translations_hand)
+        f_hand = self.faces_hand[0]
+        f_obj = self.faces_object[0]
+        # v_hand = self.v_hand
+        # v_obj = self.get_verts_object()
+
+        sdfl = scenesdf.SDFSceneLoss([f_hand, f_obj])
+        sdf_loss, sdf_meta = sdfl([vh, vo])
+        # max_depths = sdf_meta['dist_values'][(1, 0)].max(1)[0]
+        h_to_o = sdf_meta['dist_values'][(1, 0)].max(1)[0]  # .max().item()
+        o_to_h = sdf_meta['dist_values'][(0, 1)].max(1)[0]  # .max().item()
+        h_to_o = (h_to_o * 1000).view(N, T)
+        o_to_h = (o_to_h * 1000).view(N, T)
+        if h2o_only:
+            return h_to_o
+        else:
+            return h_to_o, o_to_h
 
     def forward(self, loss_weights=None):
         """

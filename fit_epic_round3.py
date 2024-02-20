@@ -10,6 +10,7 @@ import pickle
 import cv2
 import numpy as np
 import torch
+import tqdm
 
 from libyana.exputils import argutils
 from libyana.randomutils import setseeds
@@ -63,7 +64,7 @@ def get_args():
                         help="Output directory.")
     parser.add_argument("--num_obj_iterations", default=50, type=int)
     parser.add_argument("--num_joint_iterations", default=201, type=int)
-    parser.add_argument("--num_initializations", default=500, type=int)
+    parser.add_argument("--num_initializations", default=100, type=int)  # was 200 for most, then changed to 100 otherwise can't finish
     parser.add_argument("--mesh_path", type=str, help="Index of mesh ")
     parser.add_argument("--result_root", default="results/epichor")
     parser.add_argument(
@@ -73,7 +74,7 @@ def get_args():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--viz_step", default=20, type=int)
     # parser.add_argument("--save_indep", action="store_true")
-    parser.add_argument("--only_missing", choices=[0, 1], type=int)
+    parser.add_argument("--only_missing", choices=[0, 1], default=1, type=int)
 
     parser.add_argument("--optimize_mano", choices=[0, 1], default=0, type=int)
     parser.add_argument("--optimize_mano_beta",
@@ -188,9 +189,10 @@ def main(args):
 
     all_metrics = defaultdict(list)
     data_stop = min(len(dataset), args.data_stop)
-    for sample_idx in range(args.data_offset, data_stop, args.data_step):
+    for sample_idx in tqdm.trange(args.data_offset, data_stop, args.data_step):
         annots = dataset[sample_idx]
         vid_start_end = annots['annot_full_key']
+        print(f"Running sample_idx = {sample_idx}", vid_start_end)
 
         sample_folder = os.path.join(args.result_root, "samples", vid_start_end)
         os.makedirs(sample_folder, exist_ok=True)

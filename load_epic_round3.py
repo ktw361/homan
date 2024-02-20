@@ -5,25 +5,22 @@ import argparse
 from collections import defaultdict
 import logging
 import os
-import pickle
 
 import cv2
 import numpy as np
 import torch
+import tqdm
 import torch.nn as nn
-from pytorch3d.ops.knn import knn_points
 
 from libyana.exputils import argutils
 from libyana.randomutils import setseeds
 
 from homan import getdataset
-from homan.jointopt import optimize_hand_object
 from homan.lib2d import maskutils
-from homan.arctic_pose_optimization import find_optimal_poses
+from homan.pose_optimization import find_optimal_poses
 from homan.prepare.frameinfos import get_frame_infos, get_gt_infos
 from homan.tracking import preprocess
 from homan.utils.bbox import bbox_xy_to_wh, make_bbox_square
-from homan.viz import cliputils
 from homan.datasets.visor_mask_extractor import VisorMaskExtractor
 from handmocap.hand_mocap_api import HandMocap
 import pandas as pd
@@ -37,20 +34,17 @@ def get_args():
     parser = argparse.ArgumentParser(
         description="Optimize object meshes w.r.t. hand.")
     parser.add_argument("--dataset",
-                        default="arctic_stable",
+                        default="epichor",
                         choices=[
-                            "arctic_stable"
+                            "epichor",
                         ],
                         help="Dataset name")
     parser.add_argument("--frame_nb",
                         default=30,
                         type=int,
                         help="Number of video frames to process in a batch")
-    parser.add_argument("--learnt_obj_pose", choices=[0, 1], default=1)
-    parser.add_argument("--gt_mano", choices=[0, 1], default=1, type=int)
-
     parser.add_argument("--box_mode", choices=["gt", "track"], default="gt")
-    parser.add_argument("--gt_masks", choices=[0, 1], default=1, type=int)
+    parser.add_argument("--gt_masks", choices=[0, 1], default=0, type=int)
     parser.add_argument("--data_step", default=1, type=int)
     parser.add_argument("--data_offset", default=0, type=int)
     parser.add_argument("--data_stop", default=99999, type=int)
@@ -62,11 +56,13 @@ def get_args():
     parser.add_argument("--output_dir",
                         default="output",
                         help="Output directory.")
+    parser.add_argument('--export_homan', choices=[0, 1], default=0, type=int,
+                        help="Save homan model. Typical Used for qualitative comparison")
     parser.add_argument("--num_obj_iterations", default=0, type=int)
     parser.add_argument("--num_joint_iterations", default=0, type=int)
-    parser.add_argument("--num_initializations", default=50, type=int)
+    parser.add_argument("--num_initializations", default=1, type=int)  # was 500
     parser.add_argument("--mesh_path", type=str, help="Index of mesh ")
-    parser.add_argument("--result_root", default="results/arctic_stable")
+    parser.add_argument("--result_root", default="results/epichor")
     parser.add_argument(
         "--resume",
         help="Path to root folder of previously computed optimization results")
@@ -184,23 +180,26 @@ def main(args):
     )
     print(f"Processing {len(dataset)} samples")
     # Get pretrained networks
-    # mask_extractor = MaskExtractor()
     mask_extractor = VisorMaskExtractor()
-    # hand_predictor = HandMocap(args.hand_checkpoint, args.smpl_path)
+    hand_predictor = HandMocap(args.hand_checkpoint, args.smpl_path)
 
     all_metrics = defaultdict(list)
     data_stop = min(len(dataset), args.data_stop)
-    for sample_idx in range(args.data_offset, data_stop, args.data_step):
+    for sample_idx in tqdm.trange(args.data_offset, data_stop, args.data_step):
         annots = dataset[sample_idx]
         vid_start_end = annots['annot_full_key']
+        print(f"Running sample_idx = {sample_idx}", vid_start_end)
 
         sample_folder = os.path.join(args.result_root, "samples", vid_start_end)
         os.makedirs(sample_folder, exist_ok=True)
         save_path = os.path.join(args.result_root, "results.pkl")
         sample_path = os.path.join(sample_folder, "results.pkl")
         check_path = os.path.join(sample_folder, "epichor_metric.csv")
-        if args.only_missing and os.path.exists(check_path):
-            print(f"Skipping existing {sample_path}")
+        # if args.only_missing and os.path.exists(check_path):
+        #     print(f"Skipping existing {sample_path}")
+        #     continue
+        out_csv = os.path.join(sample_folder, "ho_metrics.csv")
+        if args.only_missing and os.path.exists(out_csv):
             continue
 
         print("Pre-processing detections")
@@ -252,9 +251,9 @@ def main(args):
             mask_extractor._mask_hand = annots['masks_hand']
             mask_extractor._mask_obj = annots['masks_obj']
 
-            det_person_parameters, obj_mask_infos, super2d_imgs = get_frame_infos(
+            person_parameters, obj_mask_infos, super2d_imgs = get_frame_infos(
                 images_np,
-                None, # hand_predictor,
+                hand_predictor,
                 mask_extractor,
                 sample_folder=sample_folder,
                 hand_bboxes=hand_bboxes,
@@ -263,18 +262,6 @@ def main(args):
                 debug=args.debug,
                 image_size=image_size,
             )
-            if args.gt_mano:
-                person_parameters = annots['gt_person_parameters']
-                for i in range(len(person_parameters)):
-                    for k, v in person_parameters[i].items():
-                        if isinstance(v, torch.Tensor):
-                            person_parameters[i][k] = v.cuda()
-                for i in range(len(det_person_parameters)):
-                    person_parameters[i]['masks'] = det_person_parameters[i]['masks']
-                    person_parameters[i]['cams'] = torch.ones([1, 3], device='cuda', dtype=torch.float32)  # not really used
-                    # person_parameters[i]['cams'] = det_person_parameters[i]['cams']  # not really used
-            else:
-                person_parameters = det_person_parameters
 
             super2d_img_path = os.path.join(sample_folder,
                                             "detections_masks.png")
@@ -299,9 +286,6 @@ def main(args):
             obj_verts_can = annots["objects"][0]['canverts3d']
             obj_faces = annots["objects"][0]['faces']
 
-            rotations_inits = annots['rotations_inits'].cuda()
-            translations_inits = annots['translations_inits'].cuda()
-
             # Compute object pose initializations
             object_parameters = find_optimal_poses(
                 images=images_np,
@@ -309,9 +293,7 @@ def main(args):
                 vertices=obj_verts_can[0],
                 faces=obj_faces[0],
                 annotations=obj_mask_infos,
-                rotations_inits=rotations_inits,
-                translations_inits=translations_inits,
-                # num_initializations=args.num_initializations,
+                num_initializations=args.num_initializations,
                 num_iterations=args.num_obj_iterations,
                 Ks=camintr,
                 viz_path=os.path.join(sample_folder, "optimal_pose.png"),
@@ -384,7 +366,7 @@ def main(args):
         camintr=camintr_nc
         state_dict=state_dict
         optimize_hand_pose=False
-        
+
         verts_object_og = npt.tensorify(objvertices).cuda()
         faces_object = npt.tensorify(objfaces).cuda()
 
@@ -461,6 +443,8 @@ def main(args):
         )
 
         # Load the results
+        if not os.path.exists(os.path.join(sample_folder, "homan_object_poses.pth")):
+            continue
         homan_object_poses = torch.load(os.path.join(sample_folder, "homan_object_poses.pth"))
         model.translations_object = nn.Parameter(homan_object_poses['translations_object'])
         model.rotations_object = nn.Parameter(homan_object_poses['rotations_object'])
@@ -469,19 +453,6 @@ def main(args):
         # EPIC-HOR metrics
         with torch.no_grad():
             verts_pred, _ = model.get_verts_object()  # (N, V, 3)
-            verts_gt = annots['objects'][0]['verts3d'].cuda()
-            diameter = annots['diameter']
-            # ADD & ADD-CLS
-            v2v_dist = ((verts_gt - verts_pred)**2).sum(dim=2).sqrt()  # (N, V)
-            add_010 = (v2v_dist < 0.10 * diameter).sum(dim=1).float() / v2v_dist.size(1)  # (N,)
-            add_010_mean = add_010.mean()
-            add_cls_010 = (v2v_dist.mean() < 0.10 * diameter).float()  # (N,)
-            # ADD-S & ADD-S-CLS
-            v2nn_dist = knn_points(verts_pred, verts_gt, K=1).dists
-            add_s_001 = (v2nn_dist < 0.01 * diameter).sum(dim=1).float() / v2nn_dist.size(1)
-            add_s_001_mean = add_s_001.mean()
-            add_s_cls_001 = (v2nn_dist.mean() < 0.01 * diameter).float()
-
             # IOU
             _, sil_metric_dict = model.losses.compute_sil_loss_object(
                 verts=verts_pred, faces=model.faces_object)
@@ -499,11 +470,7 @@ def main(args):
 
         rows = [
             dict(
-                iou=iou, 
-                add_010=add_010_mean.item(),
-                add_cls_010=add_cls_010.item(),
-                add_s_001=add_s_001_mean.item(),
-                add_s_cls_001=add_s_cls_001.item(),
+                oious=iou,
                 max_iv=max_iv.item(),
                 avg_sca=avg_sca.item(),
                 min_sca=min_sca.item(),
@@ -514,6 +481,8 @@ def main(args):
         df = pd.DataFrame(rows)
         out_csv = os.path.join(sample_folder, "ho_metrics.csv")
         df.to_csv(out_csv)
+        if args.export_homan:
+            torch.save(model, os.path.join(sample_folder, 'homan.pth'))
 
 
 if __name__ == "__main__":

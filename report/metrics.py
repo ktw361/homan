@@ -29,7 +29,9 @@ def get_meshes(homan, scene_idx=0):
     # return visualize_mesh([mhand, mobj], show_axis=False, viewpoint='nr')
 
 
-def to_scene(homan, scene_idx=-1, show_axis=False, viewpoint='nr'):
+def to_scene(homan, scene_idx=-1, 
+             scene_indices=None, disp=0.15,
+             show_axis=False, viewpoint='nr'):
     """
     homan.faces_hand: (1, 1538, 3)
     homan.faces_object: (30, 2000, 3)
@@ -45,12 +47,12 @@ def to_scene(homan, scene_idx=-1, show_axis=False, viewpoint='nr'):
         return visualize_mesh([mhand, mobj], show_axis=show_axis, viewpoint=viewpoint)
 
     meshes = []
-    disp = 0.15  # displacement
     T = len(verts_hand)
-    for t in range(T):
+    scene_indices = scene_indices or range(T)
+    for i, t in enumerate(scene_indices):
         mhand, mobj = get_meshes(homan, t)
-        mhand.apply_translation_([t * disp, 0, 0])
-        mobj.apply_translation_([t * disp, 0, 0])
+        mhand.apply_translation_([i * disp, 0, 0])
+        mobj.apply_translation_([i * disp, 0, 0])
         meshes.append(mhand)
         meshes.append(mobj)
     return visualize_mesh(meshes, show_axis=show_axis, viewpoint=viewpoint)

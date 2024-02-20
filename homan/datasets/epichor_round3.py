@@ -52,7 +52,7 @@ def keep_valid_frames(start: int,
         else:
             keep_frames.append(r)
             avail.pop(i)
-    return keep_frames
+    return sorted(keep_frames)
 
 
 def apply_bbox_transform(bbox, affine_trans):

@@ -332,6 +332,7 @@ def find_optimal_pose(
     )
     model.cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    losses = torch.ones([]) * 1000.
     for step in range(num_iterations):
         optimizer.zero_grad()
         loss_dict, iou, sil = model()
