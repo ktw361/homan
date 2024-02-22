@@ -51,6 +51,8 @@ def get_args():
                         help="Number of video frames to process in a batch")
     parser.add_argument("--box_mode", choices=["gt", "track"], default="gt")
     parser.add_argument("--gt_masks", choices=[0, 1], default=0, type=int)
+    parser.add_argument("--use_hamer", choices=[0, 1], default=0, type=int,
+                        help='Use hamer for mano (instead of frankmocap)')
     parser.add_argument("--data_step", default=1, type=int)
     parser.add_argument("--data_offset", default=0, type=int)
     parser.add_argument("--data_stop", default=99999, type=int)
@@ -66,7 +68,7 @@ def get_args():
     parser.add_argument("--num_joint_iterations", default=201, type=int)
     parser.add_argument("--num_initializations", default=100, type=int)  # was 200 for most, then changed to 100 otherwise can't finish
     parser.add_argument("--mesh_path", type=str, help="Index of mesh ")
-    parser.add_argument("--result_root", default="results/epichor")
+    parser.add_argument("--result_root", type=str, required=True) # , default="results/epichor")
     parser.add_argument(
         "--resume",
         help="Path to root folder of previously computed optimization results")
@@ -181,11 +183,14 @@ def main(args):
         box_mode=args.box_mode,
         chunk_step=None,
         epic_mode=None,
+        epic_use_hamer=args.use_hamer,
     )
     print(f"Processing {len(dataset)} samples")
     # Get pretrained networks
     mask_extractor = VisorMaskExtractor()
     hand_predictor = HandMocap(args.hand_checkpoint, args.smpl_path)
+    if args.use_hamer:
+        hand_predictor = None
 
     all_metrics = defaultdict(list)
     data_stop = min(len(dataset), args.data_stop)
@@ -252,7 +257,7 @@ def main(args):
             mask_extractor._mask_hand = annots['masks_hand']
             mask_extractor._mask_obj = annots['masks_obj']
 
-            person_parameters, obj_mask_infos, super2d_imgs = get_frame_infos(
+            det_person_parameters, obj_mask_infos, super2d_imgs = get_frame_infos(
                 images_np,
                 hand_predictor,
                 mask_extractor,
@@ -263,6 +268,17 @@ def main(args):
                 debug=args.debug,
                 image_size=image_size,
             )
+            if args.use_hamer:
+                person_parameters = annots['hamer_person_parameters']
+                for i in range(len(person_parameters)):
+                    for k, v in person_parameters[i].items():
+                        if isinstance(v, torch.Tensor):
+                            person_parameters[i][k] = v.cuda()
+                for i in range(len(det_person_parameters)):
+                    person_parameters[i]['masks'] = det_person_parameters[i]['masks']
+                    person_parameters[i]['cams'] = torch.ones([1, 3], device='cuda', dtype=torch.float32)  # not really used
+            else:
+                person_parameters = det_person_parameters
 
             super2d_img_path = os.path.join(sample_folder,
                                             "detections_masks.png")

@@ -17,6 +17,7 @@ def get_dataset(
     use_cache=True,
     use_visor_mask=False,
     epic_mode="chunk",
+    epic_use_hamer=False,
 ):
     if dataset == "ho3d":
         image_size = 640
@@ -56,7 +57,7 @@ def get_dataset(
         dataset = ArcticStable(frame_nb=frame_nb)
     elif dataset == 'epichor':
         image_size = 640
-        dataset = EPICHOR_ROUND3(frame_nb=frame_nb)
+        dataset = EPICHOR_ROUND3(frame_nb=frame_nb, use_hamer=epic_use_hamer)
     else:
         raise ValueError(
             f"{dataset} not in [ho3d|contactpose|core50]")

@@ -9,6 +9,7 @@ import torch
 from homan.datasets import collate
 from homan.tracking import trackhoa as trackhoadf
 from homan.utils import bbox as bboxutils
+from pytorch3d.transforms import rotation_6d_to_matrix
 
 import os
 import os.path as osp
@@ -19,6 +20,9 @@ from libyana.lib3d import kcrop
 from libyana.transformutils import handutils
 from manopth import manolayer
 from homan.datasets.epichor_reader_lib.reader import Reader
+
+from libzhifan.geometry import CameraManager
+from homan.datasets.epichor_lib.hamer_loader import HamerLoader
 
 
 EPIC_HOA_SIZE = (1920, 1080)
@@ -91,6 +95,7 @@ class EPICHOR_ROUND3:
         frame_nb=30,
         image_sets='/home/barry/Zhifan/epic_hor_method/code_epichor/image_sets/epichor_round3_2447valid_nonempty.csv',
         cache_dir='/media/barry/DATA/Zhifan/epic_hor_data/cache',
+        use_hamer=False,
     ):
         """
         Arguments:
@@ -103,6 +108,9 @@ class EPICHOR_ROUND3:
         super().__init__()
         self.name = "epichor"
         self.object_models = load_models()
+        self.use_hamer = use_hamer
+        if self.use_hamer:
+            self.hamer_loader = HamerLoader(ho_version='v1', load_only=False)
 
         self.vid_index = self.read_vid_index(image_sets)
         self.reader = Reader(mask_version='unfiltered')
@@ -225,15 +233,15 @@ class EPICHOR_ROUND3:
             canverts3d = self.object_models[cat]['verts']
             obj_faces = self.object_models[cat]['faces']
             obj_info = dict(
-                verts3d=np.zeros_like(canverts3d), 
+                verts3d=np.zeros_like(canverts3d),
                 canverts3d=canverts3d,
-                faces=obj_faces,  
+                faces=obj_faces,
                 path="NONE",
                 bbox=obox.astype(np.float32))
             hbox = apply_bbox_transform(hand_box, affine_trans)
             hand_label = long_side.replace(' ', '_')   # "left hand" -> "left_hand"
             hand_info = dict(
-                verts3d=np.zeros([778, 3]), 
+                verts3d=np.zeros([778, 3]),
                 faces=self.left_faces if long_side == 'left hand' else self.right_faces,
                 label=hand_label,
                 bbox=hbox.astype(np.float32)
@@ -270,22 +278,94 @@ class EPICHOR_ROUND3:
                    images=images,
                    masks_hand=masks_hand,
                    masks_obj=masks_obj,
-                   annot_full_key=annot_full_key)
+                   annot_full_key=annot_full_key
+                   )
+
+        if self.use_hamer:
+            hamer_person_parameters = self.hamer_person_parameter(
+                vid, frame_idxs, short_side, seq_hand_infos)
+            obs['hamer_person_parameters'] = hamer_person_parameters
 
         return obs
 
+    def get_hamer_cam(self):
+        """ Camera for Hamer """
+        epic_focal = 5000  # Please make this infinite
+        out_w, out_h = self.image_size
+        global_cam = CameraManager(
+            fx=epic_focal, fy=epic_focal, cx=out_w//2, cy=out_h//2,
+            img_h=out_h, img_w=out_w)
+        return global_cam
+
     def get_camintr(self):
-        focal = 200
-        cam_intr = np.array([
-            [focal, 0, 640 // 2],
-            [0, focal, 360 // 2],
-            [0, 0, 1],
-        ])
+        if self.use_hamer:
+            cam_intr = self.get_hamer_cam().get_K()
+        else:
+            focal = 200
+            cam_intr = np.array([
+                [focal, 0, 640 // 2],
+                [0, focal, 360 // 2],
+                [0, 0, 1],
+            ])
         return cam_intr
 
-    # def get_focal_nc(self):
-    #     cam_intr = self.get_camintr()
-    #     return (cam_intr[0, 0] + cam_intr[1, 1]) / 2 / max(self.image_size)
+    def hamer_person_parameter(self, vid, frame_inds, side: str, seq_hand_infos):
+        """
+        """
+        N = len(frame_inds)
+        is_left = 'left' in side
+        mano_tracer = self.hamer_loader.l_mano_tracer if is_left else self.hamer_loader.r_mano_tracer
+        global_cam = self.get_hamer_cam()
+        camintr = self.get_camintr()
+
+        mano_pca_pose, mano_pose, mano_betas, hand_rotation_6d, hand_translation = \
+            self.hamer_loader.get_hamer_parmas(
+                global_cam, vid, frame_inds, is_left, 'cuda')
+        th_pose_coeffs = torch.cat(
+            [mano_pca_pose.new_zeros([N, 3]), mano_pca_pose], -1)
+        vh, _, _ = mano_tracer.forward(th_pose_coeffs, mano_betas)  # (N, 778, 3)
+        vh = vh / 1000.  # in hand space
+        fh = mano_tracer.th_faces
+
+        device = 'cpu'
+        mano_pca_pose = mano_pca_pose.to(device)
+        mano_pose = mano_pose.to(device)
+        mano_betas = mano_betas.to(device)
+        hand_rotation_mats = rotation_6d_to_matrix(hand_rotation_6d).to(device)
+        hand_translation = hand_translation.to(device)
+
+        person_params = []
+        for i, f in enumerate(frame_inds):
+            hbox = seq_hand_infos[i][0]['bbox']
+
+            verts = vh[[i]].view(1, 778, 3).to(device)
+            faces = torch.as_tensor(fh, device=device).view(1, 1538, 3)
+            rotations = hand_rotation_mats[[i]].permute(0, 2, 1)  # in HOMan it's V @ R
+            translations = hand_translation[[i]].to(device)
+            mano_rot = mano_pose.new_zeros(1, 3)
+            mano_trans = mano_pose.new_zeros(1, 3)
+            verts2d = torch.as_tensor(camintr).matmul(verts[0].permute(1, 0)).permute(1, 0)
+            verts2d = verts2d / verts2d[:, 2:]
+            verts2d = verts2d[:, :2].view(1, 778, 2)
+            verts2d = torch.zeros_like(verts2d)  # Just use GT hand. (verts2d is called in loss_2d, but just fix to GT for now)
+
+            person_param = dict(
+                bboxes=torch.as_tensor(hbox, device=device).view(1, 4),
+                faces=faces,
+                verts=verts,  # GT ego verts in 3D
+                verts2d=verts2d,
+                rotations=rotations,
+                mano_pose=mano_pose,
+                mano_pca_pose=mano_pca_pose,
+                mano_rot=mano_rot,  # zeros
+                mano_betas=mano_betas,
+                mano_trans=mano_trans,  # zeros
+                translations=translations,
+                hand_side=[side],
+            )
+            person_params.append(person_param)
+
+        return person_params
 
     def __len__(self):
         return len(self.vid_index)
