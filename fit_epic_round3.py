@@ -511,11 +511,22 @@ def main(args):
             _, sil_metric_dict = model.losses.compute_sil_loss_object(
                 verts=verts_pred, faces=model.faces_object)
             iou = sil_metric_dict['iou_object']
-            _, sil_metric_dict = model.losses.compute_sil_loss_object(
-                verts=verts_pred, faces=model.faces_object)
-            iou = sil_metric_dict['iou_object']
+
+            # HO Metrics
+            vh, _ = model.get_verts_hand()
+            vo = verts_pred
+            max_iv = model.get_iv(vh, vo)
+            avg_sca, min_sca = model.get_sca(vh, vo)
+            pd_h2o, pd_o2h = model.penetration_depth(vh, vo, h2o_only=False)
         rows = [
-            dict(iou=iou)
+            dict(
+                oious=iou,
+                max_iv=max_iv.item(),
+                avg_sca=avg_sca.item(),
+                min_sca=min_sca.item(),
+                pd_h2o=pd_h2o.max().item(),
+                pd_o2h=pd_o2h.max().item(),
+            )
         ]
         pd.DataFrame(rows).to_csv(
             os.path.join(sample_folder, "epichor_metric.csv"))
